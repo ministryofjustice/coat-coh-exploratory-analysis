@@ -30,11 +30,24 @@ CSS = """
   position: fixed;
   top: 4.5rem;
   height: calc(100vh - 4.5rem);
+  padding-bottom: calc(var(--footer-height) + var(--footer-gap));
 }
 
-[data-testid="stAppViewContainer"] .govuk-footer {
+.govuk-footer {
+  position: fixed;
+  left: 0;
+  bottom: 0;
   width: 100vw;
   z-index: 999999; /* Higher than Streamlit's sidebar z-index */
+}
+
+:root {
+  --footer-height: min(10rem, 40dvh);
+  --footer-gap: 10rem;
+}
+
+[data-testid="stMainBlockContainer"] {
+  padding-bottom: calc(var(--footer-height) + var(--footer-gap));
 }
 </style>
 """
