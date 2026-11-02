@@ -33,8 +33,6 @@ CSS = """
 }
 
 [data-testid="stAppViewContainer"] .govuk-footer {
-  left: 0;
-  bottom: 0;
   width: 100vw;
   z-index: 999999; /* Higher than Streamlit's sidebar z-index */
 }
