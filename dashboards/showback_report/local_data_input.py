@@ -1,6 +1,8 @@
 import streamlit as st
 from config import DASHBOARD_NAME
 
+from render_html import render_header, render_footer
+
 def manual_file_upload():
     st.sidebar.header("Data input")
     uploaded_file = st.sidebar.file_uploader(
@@ -39,6 +41,9 @@ def manual_file_upload():
 
     if not uploaded_file:
         st.info("Upload your CSV file in the left sidebar to start.")
+
+        render_footer()
+
         st.stop()
 
     return uploaded_file
