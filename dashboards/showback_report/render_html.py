@@ -32,8 +32,7 @@ CSS = """
   height: calc(100vh - 4.5rem);
 }
 
-.govuk-footer {
-  position: fixed;
+[data-testid="stAppViewContainer"] .govuk-footer {
   left: 0;
   bottom: 0;
   width: 100vw;
