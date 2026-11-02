@@ -1,5 +1,5 @@
 import streamlit as st
-
+from config import DASHBOARD_NAME
 
 CSS = """
 <link rel="stylesheet" href="/showback-report/app/static/stylesheets/moj-frontend.min.css">
@@ -44,7 +44,7 @@ CSS = """
 
 
 def render_header() -> None:
-  HEADER_HTML = """
+  HEADER_HTML = f"""
 <div id="moj-header-root">
   <header class="moj-header" role="banner">
     <div class="moj-header__container">
@@ -55,7 +55,7 @@ def render_header() -> None:
           Ministry of Justice
         </a>
         <a class="moj-header__link moj-header__link--service-name" href="/">
-          Showback Report
+          {DASHBOARD_NAME}
         </a>
       </div>
     </div>

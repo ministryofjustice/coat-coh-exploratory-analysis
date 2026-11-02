@@ -1,8 +1,9 @@
 import plotly.express as px
 import streamlit as st
 
+
 from auth import require_auth0_login
-from config import APP_ENV
+from config import APP_ENV, DASHBOARD_NAME
 from hosting_data import MissingColumnsError, read_hosting_csv
 from hosting_report import (
     ALL_BUSINESS_UNITS,
@@ -20,7 +21,7 @@ from local_data_input import manual_file_upload
 from render_html import render_footer, render_header
 
 st.set_page_config(
-    page_title="Hosting Showback Report",
+    page_title=DASHBOARD_NAME,
     page_icon="💰",
     layout="wide",
 )
@@ -31,7 +32,9 @@ render_footer()
 if APP_ENV:
     require_auth0_login()
 
-st.title("Hosting Showback Report")
+from config import DASHBOARD_NAME
+
+st.title(DASHBOARD_NAME)
 st.caption(
     "Cost in the AWS cost category service_area = Hosting. "
     "Net cost, excluding tax, discount and fee lines."

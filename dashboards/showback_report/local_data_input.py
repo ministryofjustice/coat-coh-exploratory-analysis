@@ -1,10 +1,10 @@
 import streamlit as st
-
+from config import DASHBOARD_NAME
 
 def manual_file_upload():
     st.sidebar.header("Data input")
     uploaded_file = st.sidebar.file_uploader(
-        "Upload AWS Cost Optimization Hub CSV export",
+        f"Upload {DASHBOARD_NAME} CSV export",
         type=["csv"],
     )
 
