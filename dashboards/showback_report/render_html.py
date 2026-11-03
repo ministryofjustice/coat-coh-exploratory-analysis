@@ -48,8 +48,7 @@ body {
 }
 
 [id="root"] .govuk-footer {
-  margin-top: auto;
-  padding-top: 10rem;
+  margin-top: 40rem;
 }
 
 ## Static footer positioning
