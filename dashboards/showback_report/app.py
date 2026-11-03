@@ -131,13 +131,13 @@ TABLE_COLUMNS = {
         "Spend (USD)", format="dollar"
     ),
     "pct_of_total": st.column_config.ProgressColumn(
-        "Share of total (%)", format="%.1f%%", min_value=0, max_value=100
+        "Share of total (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
     ),
     "pct_of_account": st.column_config.ProgressColumn(
-        "Share of account spend (%)", format="%.1f%%", min_value=0, max_value=100
+        "Share of account spend (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
     ),
     "pct_of_namespace": st.column_config.ProgressColumn(
-        "Share of namespace spend (%)", format="%.1f%%", min_value=0, max_value=100
+        "Share of namespace spend (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
     ),
     "tagged_usage_cost_usd": st.column_config.NumberColumn(
         "Tagged usage cost (USD)", format="dollar"
@@ -146,7 +146,7 @@ TABLE_COLUMNS = {
         "Taggable usage cost (USD)", format="dollar"
     ),
     "pct_tagged": st.column_config.ProgressColumn(
-        "Tagging coverage (%)", format="%.1f%%", min_value=0, max_value=100
+        "Tagging coverage (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
     ),
 }
 

@@ -6,12 +6,62 @@ CSS = """
 <link rel="stylesheet" href="/showback-report/app/static/stylesheets/govuk-frontend-5.1.0.min.css">
 
 <style>
-/* Replace Streamlit's fixed toolbar/header with the MoJ service header. */
-[data-testid="stHeader"] {
-  display: none;
+:root {
+  --showback-footer-height: 16rem;
 }
 
-[data-testid="stToolbar"] {
+[data-testid="stAppViewContainer"],
+[data-testid="stAppViewContainer"] :is(p, label, input, button, select, h1, h2, h3),
+[data-testid="stSidebar"] :is(p, label, input, button, select, h1, h2, h3),
+.govuk-footer {
+  font-family: Arial, sans-serif;
+  color: #0b0c0c;
+}
+
+[data-testid="stSidebar"] {
+  background-color: #f3f2f1;
+  border-right: 1px solid #b1b4b6;
+}
+
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] [role="combobox"],
+[data-testid="stSidebar"] :is([data-testid="stSelectbox"], [data-testid="stMultiSelect"]) [role="group"],
+[data-testid="stFileUploaderDropzone"],
+[data-testid="stDataFrame"],
+[data-testid="stDataFrameResizable"],
+[data-testid="stDataFrame"] .stDataFrameGlideDataEditor {
+  border-radius: 0;
+}
+
+[data-testid="stDataFrameResizable"] {
+  border-radius: 0 !important;
+}
+
+[data-testid="stSidebar"] [data-baseweb="select"] > div,
+[data-testid="stSidebar"] :is([data-testid="stSelectbox"], [data-testid="stMultiSelect"]) [role="group"],
+[data-testid="stFileUploaderDropzone"] {
+  border: 1px solid #b1b4b6;
+  background-color: #ffffff;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab-highlight"],
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] .react-aria-SelectionIndicator {
+  background-color: #1d70b8;
+}
+
+[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+  color: #1d70b8;
+}
+
+/* Replace Streamlit's fixed toolbar/header with the MoJ service header. */
+[data-testid="stHeader"] {
+  background: transparent;
+  top: 4.5rem;
+}
+
+[data-testid="stToolbarActions"],
+[data-testid="stMainMenu"],
+[data-testid="stAppDeployButton"] {
   display: none;
 }
 
@@ -29,46 +79,100 @@ CSS = """
 [data-testid="stSidebar"] {
   position: fixed;
   top: 4.5rem;
-  height: calc(100vh - 4.5rem);
-  padding-bottom: calc(var(--footer-height) + var(--footer-gap));
+  height: calc(100dvh - 4.5rem);
 }
 
-## Dynamic footer positioning
-
-html,
-body {
-  margin: 0;
-  min-height: 100%;
-}
-
-[id="root"] {
+[data-testid="stMainBlockContainer"] {
+  --showback-content-gutter: 5rem;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: 100dvh;
+  padding-inline: var(--showback-content-gutter);
+  padding-bottom: 0;
 }
 
-[id="root"] .govuk-footer {
-  margin-top: 30rem;
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] {
+  flex: 1;
 }
 
-## Static footer positioning
+[data-testid="stElementContainer"]:has(.govuk-footer) {
+  margin-top: auto;
+}
 
-# [id="root"] .govuk-footer {
-#   position: fixed;
-#   bottom: 0;
-#   left: 0;
-#   right: 0;
-#   z-index: 999999; /* Higher than Streamlit's sidebar z-index */
-# }
+[data-testid="stMarkdownContainer"]:has(> .govuk-footer) {
+  margin-bottom: 0;
+}
 
-# :root {
-#   --footer-height: min(10rem, 40dvh);
-#   --footer-gap: 10rem;
-# }
+.govuk-footer {
+  position: static;
+  width: calc(100% + 2 * var(--showback-content-gutter));
+  margin-inline: calc(-1 * var(--showback-content-gutter));
+  height: var(--showback-footer-height);
+  box-sizing: border-box;
+  padding-block: 2rem;
+  border-top: 1px solid #b1b4b6;
+  background-color: #f3f2f1;
+  color: #0b0c0c;
+  font-size: 1rem;
+  line-height: 1.5;
+  overflow-y: auto;
+}
 
-# [data-testid="stMainBlockContainer"] {
-#   padding-bottom: calc(var(--footer-height) + var(--footer-gap));
-# }
+.govuk-footer > .govuk-width-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  max-width: none;
+  margin-inline: var(--showback-content-gutter, 1rem);
+}
+
+.govuk-footer .govuk-footer__crown {
+  flex-shrink: 0;
+}
+
+.govuk-footer .govuk-footer__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem 2rem;
+  margin: 1rem 0 0;
+}
+
+.govuk-footer .govuk-footer__meta-item {
+  margin: 0;
+}
+
+.govuk-footer .govuk-footer__meta-item--grow {
+  flex: 1 1 28rem;
+}
+
+.govuk-footer .govuk-footer__licence-logo {
+  margin-right: 0.5rem;
+  vertical-align: middle;
+}
+
+.govuk-footer .govuk-footer__link {
+  color: #0b0c0c;
+  text-decoration: underline;
+}
+
+.govuk-footer .govuk-footer__copyright-logo {
+  min-width: 0;
+  padding-top: 0;
+  background-image: none;
+}
+
+@media (max-width: 48rem) {
+  :root {
+    --showback-footer-height: 14rem;
+  }
+
+  [data-testid="stMainBlockContainer"] {
+    --showback-content-gutter: 1rem;
+  }
+}
+
 </style>
 """
 
@@ -81,7 +185,7 @@ def render_header() -> None:
       <div class="moj-header__logo">
         <img src="/showback-report/app/static/images/moj-logotype-crest.png" alt=""
              width="40" height="40" class="moj-header__logotype-crest">
-        <a class="moj-header__link moj-header__link--organisation-name" href="#">
+        <a class="moj-header__link moj-header__link--organisation-name" href="https://www.gov.uk/government/organisations/ministry-of-justice">
           Ministry of Justice
         </a>
         <a class="moj-header__link moj-header__link--service-name" href="/">
@@ -154,4 +258,4 @@ def render_footer() -> None:
 </div>
 """
 
-  st.markdown(CSS + FOOTER_HTML, unsafe_allow_html=True,)
+  st.markdown( FOOTER_HTML, unsafe_allow_html=True)
