@@ -51,6 +51,15 @@ body {
   margin-top: auto;
 }
 
+:root {
+  --footer-height: min(10rem, 40dvh);
+  --footer-gap: 20rem;
+}
+
+[data-testid="stMainBlockContainer"] {
+  padding-bottom: calc(var(--footer-height) + var(--footer-gap));
+}
+
 ## Static footer positioning
 
 # [id="root"] .govuk-footer {
