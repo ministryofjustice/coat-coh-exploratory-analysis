@@ -27,7 +27,6 @@ st.set_page_config(
 )
 
 render_header()
-render_footer()
 
 if APP_ENV:
     require_auth0_login()
@@ -396,3 +395,5 @@ with tab_type:
         "namespace-services",
     )
     st.caption("Mapping from AWS product name, as in showback_scope.html section 7. EC2 includes its storage volumes, NAT gateways and data transfer.")
+
+render_footer()

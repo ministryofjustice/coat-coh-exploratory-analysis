@@ -33,22 +33,42 @@ CSS = """
   padding-bottom: calc(var(--footer-height) + var(--footer-gap));
 }
 
-.govuk-footer {
-  position: fixed;
-  left: 0;
-  bottom: 0;
-  width: 100vw;
-  z-index: 999999; /* Higher than Streamlit's sidebar z-index */
+## Dynamic footer positioning
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
 }
 
-:root {
-  --footer-height: min(10rem, 40dvh);
-  --footer-gap: 10rem;
+[id="root"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
 }
 
-[data-testid="stMainBlockContainer"] {
-  padding-bottom: calc(var(--footer-height) + var(--footer-gap));
+[id="root"] .govuk-footer {
+  margin-top: auto;
 }
+
+## Static footer positioning
+
+# [id="root"] .govuk-footer {
+#   position: fixed;
+#   bottom: 0;
+#   left: 0;
+#   right: 0;
+#   z-index: 999999; /* Higher than Streamlit's sidebar z-index */
+# }
+
+# :root {
+#   --footer-height: min(10rem, 40dvh);
+#   --footer-gap: 10rem;
+# }
+
+# [data-testid="stMainBlockContainer"] {
+#   padding-bottom: calc(var(--footer-height) + var(--footer-gap));
+# }
 </style>
 """
 
