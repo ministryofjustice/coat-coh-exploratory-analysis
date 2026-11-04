@@ -56,7 +56,7 @@ CSS = """
 /* Replace Streamlit's fixed toolbar/header with the MoJ service header. */
 [data-testid="stHeader"] {
   background: transparent;
-  top: 4.5rem;
+  top: 5rem;
 }
 
 [data-testid="stToolbarActions"],
@@ -73,13 +73,57 @@ CSS = """
   z-index: 999999;
 }
 
+.moj-header {
+  background-color: #0b0c0c;
+  color: white;
+  padding: 0.75rem 0;
+  border-bottom: 4px solid #1d70b8;
+}
+
+.moj-header__container {
+  display: flex;
+  align-items: center;
+  padding: 0 2rem;
+  max-width: 100%;
+}
+
+.moj-header__logo {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.moj-header__logotype-crest {
+  width: 40px;
+  height: 40px;
+}
+
+.moj-header__link {
+  color: white;
+  text-decoration: none;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.moj-header__link--organisation-name {
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.moj-header__link--service-name {
+  text-decoration: underline;
+  font-size: 1rem;
+  font-weight: 700;
+  margin-left: 0.5rem;
+}
+
 /* The sidebar is itself a fixed-position element, so it must be offset
    using `top`/`height`, not `margin-top`, or it will render underneath
    the header instead of being pushed down by it. */
 [data-testid="stSidebar"] {
   position: fixed;
-  top: 4.5rem;
-  height: calc(100dvh - 4.5rem);
+  top: 5rem;
+  height: calc(100dvh - 5rem);
 }
 
 [data-testid="stMainBlockContainer"] {
