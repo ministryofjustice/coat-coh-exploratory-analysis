@@ -1,4 +1,5 @@
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 
@@ -9,9 +10,9 @@ from hosting_report import (
     ALL_BUSINESS_UNITS,
     filter_view,
     financial_year_spend,
+    largest_with_remainder,
     monthly_spend,
     spend_by_account,
-    spend_by_business_unit,
     spend_by_namespace,
     spend_by_namespace_service_type,
     spend_by_service_type,
@@ -118,7 +119,12 @@ if view.empty:
 # -----------------------------
 # Charts and table formats
 # -----------------------------
-BAR_COLOUR = "#12436D"
+# GSS accessible categorical palette.
+CATEGORY_COLOURS = ["#12436D", "#28A197", "#801650", "#F46A25", "#3D3D3D", "#A285D1"]
+BAR_COLOUR = CATEGORY_COLOURS[0]
+PART_TO_WHOLE_FALLBACK = (
+    "Net credits or a zero total can't be shown as parts of a whole, so a bar chart is shown instead."
+)
 TABLE_COLUMNS = {
     "billing_period": "Billing month",
     "availability": "Data availability",
@@ -186,18 +192,85 @@ def bar_chart(data, category, value, value_label, text_format, description):
         color_discrete_sequence=[BAR_COLOUR],
     )
     fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="#0b0c0c"))
-    fig.update_layout(
-        margin=dict(l=10, r=40, t=10, b=10),
-        height=max(220, 32 * len(data) + 80),
-        font=dict(color="#0b0c0c"),
-        paper_bgcolor="#ffffff",
-        plot_bgcolor="#ffffff",
-    )
     fig.update_xaxes(tickfont=dict(color="#0b0c0c"), title_font=dict(color="#0b0c0c"))
     fig.update_yaxes(tickfont=dict(color="#0b0c0c"))
+    show_chart(fig, description, margin=dict(l=10, r=40, t=10, b=10), height=max(220, 32 * len(data) + 80))
+
+
+def show_chart(fig, description, **layout):
+    fig.update_layout(font=dict(color="#0b0c0c"), paper_bgcolor="#ffffff", plot_bgcolor="#ffffff", **layout)
     st.plotly_chart(
         fig, width="stretch",
         alt=f"{description} Accounts: {account_scope}. Namespaces: {namespace_scope}.",
+    )
+
+
+def part_to_whole(values):
+    return bool((values >= 0).all() and values.sum() > 0)
+
+
+def coverage_dials(coverage, description):
+    for start in range(0, len(coverage), 4):
+        for column, row in zip(st.columns(4), coverage.iloc[start:start + 4].itertuples()):
+            with column:
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=row.pct_tagged,
+                    title=dict(text=row.tag, font=dict(size=16)),
+                    number=dict(suffix="%", valueformat=".1f", font=dict(size=28)),
+                    gauge=dict(
+                        axis=dict(range=[0, 100], ticksuffix="%"),
+                        bar=dict(color=BAR_COLOUR),
+                        bgcolor="#f3f2f1",
+                        borderwidth=0,
+                    ),
+                ))
+                show_chart(
+                    fig, f"Dial: {pct(row.pct_tagged)} of taggable usage cost carries the {row.tag} tag. {description}",
+                    height=200, margin=dict(l=45, r=45, t=50, b=10),
+                )
+
+
+def donut_chart(data, category, remainder_label, description):
+    slices = largest_with_remainder(data, category, len(CATEGORY_COLOURS), remainder_label)
+    fig = go.Figure(go.Pie(
+        labels=slices[category],
+        values=slices["spend_usd"],
+        text=slices["pct_of_total"].map(pct),
+        textinfo="text",
+        textposition="inside",
+        hole=0.55,
+        sort=False,
+        direction="clockwise",
+        marker=dict(colors=CATEGORY_COLOURS, line=dict(color="#ffffff", width=2)),
+        hovertemplate="%{label}<br>%{value:$,.2f}<br>%{text}<extra></extra>",
+    ))
+    fig.add_annotation(text=f"Total<br>{money(data['spend_usd'].sum())}", showarrow=False, font=dict(size=18))
+    show_chart(
+        fig, description, height=420, margin=dict(l=10, r=10, t=10, b=10),
+        uniformtext=dict(minsize=12, mode="hide"),
+        legend=dict(orientation="h", yanchor="top", y=-0.02, x=0),
+    )
+
+
+def treemap_chart(data, description):
+    positive = data[data["spend_usd"] > 0]
+    ranked = positive.groupby("business_unit")["spend_usd"].sum().sort_values(ascending=False).index
+    # Smaller business units share a neutral grey so no palette colour is reused.
+    colours = {unit: CATEGORY_COLOURS[rank] if rank < len(CATEGORY_COLOURS) else "#b1b4b6" for rank, unit in enumerate(ranked)}
+    fig = px.treemap(
+        positive, path=["business_unit", "account_name"], values="spend_usd",
+        color="business_unit", color_discrete_map=colours,
+    )
+    fig.update_traces(
+        texttemplate="%{label}<br>%{value:$,.0f}",
+        hovertemplate="%{label}<br>%{value:$,.2f}<extra></extra>",
+        root_color="#f3f2f1",
+        marker=dict(line=dict(color="#ffffff", width=1)),
+    )
+    show_chart(
+        fig, description, height=520, margin=dict(l=10, r=10, t=30, b=10),
+        uniformtext=dict(minsize=10, mode="hide"),
     )
 
 
@@ -229,25 +302,9 @@ with ytd_column:
         st.caption(f"Incomplete history: {len(ytd) - len(ytd_missing)} of {len(ytd)} financial-year months available.")
 
 
-tab_spend, tab_ytd, tab_trend, tab_forecast, tab_tags, tab_account, tab_type = st.tabs(
-    ["Monthly spend", "Year-to-date", "Spend trend", "Forecast", "Tagging coverage", "By account / namespace", "By service type"]
+tab_ytd, tab_trend, tab_forecast, tab_tags, tab_account, tab_type = st.tabs(
+    ["Year-to-date", "Spend trend", "Forecast", "Tagging coverage", "By account / namespace", "By service type"]
 )
-
-# -----------------------------
-# 1. Monthly spend
-# -----------------------------
-with tab_spend:
-    by_bu = spend_by_business_unit(view)
-    bar_chart(
-        by_bu, "business_unit", "spend_usd", "Spend (USD)", money,
-        f"Hosting spend by business unit for {month}, filtered to {business_unit}. "
-        "Amounts are in US dollars. The table below contains the values.",
-    )
-    report_table(
-        by_bu,
-        f"Business unit spending for {month}, {business_unit}: USD and share of total spend.",
-        "monthly-spend",
-    )
 
 with tab_ytd:
     st.subheader("Financial year-to-date spend")
@@ -311,14 +368,13 @@ with tab_forecast:
 with tab_tags:
     st.info(
         "Service Area via the AWS rule (cost category) is 100% by definition: every row here is in "
-        "the Hosting cost category. The bars show the share of cost that also carries each team tag."
+        "the Hosting cost category. The dials show the share of cost that also carries each team tag."
     )
     coverage = tagging_coverage(view)
     if coverage["pct_tagged"].notna().any():
-        bar_chart(
-            coverage, "tag", "pct_tagged", "% of taggable Usage cost carrying the tag", pct,
+        coverage_dials(
+            coverage,
             f"Tagging coverage for {month}, filtered to {business_unit}. "
-            "Bars show the percentage of taggable usage cost carrying each tag. "
             "The table below contains the percentages and cost amounts.",
         )
     else:
@@ -346,13 +402,24 @@ with tab_account:
     .sort_values("spend_usd", ascending=False)
     .head(15)
 )
+    st.subheader("Spend by account")
+    if part_to_whole(by_account["spend_usd"]):
+        largest = top_accounts.iloc[0]
+        treemap_chart(
+            by_account,
+            f"Treemap of Hosting spend for {month}, filtered to {business_unit}: tiles are grouped by business unit "
+            f"and sized by account spend. Largest account: {largest.account_name} at {money(largest.spend_usd)}. "
+            "The tables below contain the values.",
+        )
+    else:
+        st.info(PART_TO_WHOLE_FALLBACK)
+        bar_chart(
+            top_accounts, "account_name", "spend_usd", "Spend (USD)", money,
+            f"Up to 15 highest-spending accounts for {month}, filtered to {business_unit}. "
+            "Spend is combined across the selected business units, in US dollars. "
+            "The table below contains the same account totals.",
+        )
     st.subheader("Accounts: 15 largest by spend")
-    bar_chart(
-        top_accounts, "account_name", "spend_usd", "Spend (USD)", money,
-        f"Up to 15 highest-spending accounts for {month}, filtered to {business_unit}. "
-        "Spend is combined across the selected business units, in US dollars. "
-        "The table below contains the same account totals.",
-    )
     report_table(
         top_accounts,
         f"Top 15 account totals in USD for {month}, {business_unit}, ordered highest first.",
@@ -376,11 +443,21 @@ with tab_account:
 # -----------------------------
 with tab_type:
     by_type = spend_by_service_type(view)
-    bar_chart(
-        by_type, "service_type", "spend_usd", "Spend (USD)", money,
-        f"Hosting spend by service category for {month}, filtered to {business_unit}. "
-        "Amounts are in US dollars. The table below contains the values.",
-    )
+    if part_to_whole(by_type["spend_usd"]):
+        largest = by_type.iloc[0]
+        donut_chart(
+            by_type, "service_type", "Remaining service types",
+            f"Donut chart of Hosting spend by service category for {month}, filtered to {business_unit}. "
+            f"Largest: {largest.service_type} at {pct(largest.pct_of_total)}. Smaller categories may be grouped; "
+            "the table below lists every category.",
+        )
+    else:
+        st.info(PART_TO_WHOLE_FALLBACK)
+        bar_chart(
+            by_type, "service_type", "spend_usd", "Spend (USD)", money,
+            f"Hosting spend by service category for {month}, filtered to {business_unit}. "
+            "Amounts are in US dollars. The table below contains the values.",
+        )
     report_table(
         by_type,
         f"Service category spending for {month}, {business_unit}: USD and share of total spend.",

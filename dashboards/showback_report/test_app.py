@@ -1,14 +1,27 @@
+import base64
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 from streamlit.testing.v1 import AppTest
 
 from hosting_data import read_hosting_csv
+from hosting_report import tagging_coverage
 
 
 ROOT = Path(__file__).parent
 SAMPLE = ROOT / "sample_hosting.csv"
+
+
+def chart_traces(app):
+    return [json.loads(chart.proto.spec)["data"][0] for chart in app.get("plotly_chart")]
+
+
+def decoded(values):
+    if isinstance(values, dict):
+        return np.frombuffer(base64.b64decode(values["bdata"]), dtype=values["dtype"]).tolist()
+    return values
 
 
 @pytest.fixture
@@ -82,14 +95,14 @@ def test_account_namespace_filters_and_recovery(app_factory):
 
 def test_tables_render_without_download_buttons(app_factory):
     app = app_factory()
-    assert len(app.dataframe) == 9
+    assert len(app.dataframe) == 8
     assert len(app.get("download_button")) == 0
     assert app.session_state["tested_downloads"] == []
     app.selectbox(key="business_unit").select("HMPPS").run()
     account = app.multiselect(key="account_filter").options[0]
     app.multiselect(key="account_filter").set_value([account]).run()
     assert not app.exception, app.exception
-    assert len(app.dataframe) == 9
+    assert len(app.dataframe) == 8
     assert len(app.get("download_button")) == 0
     assert app.session_state["tested_downloads"] == []
     for table in app.dataframe:
@@ -98,22 +111,25 @@ def test_tables_render_without_download_buttons(app_factory):
 
 def test_progress_columns_and_negative_share_fallback(app_factory):
     app = app_factory()
-    columns = json.loads(app.dataframe[0].proto.columns)
+    table = next(table for table in app.dataframe if "pct_of_total" in table.value)
+    columns = json.loads(table.proto.columns)
     assert columns["pct_of_total"]["type_config"]["type"] == "progress"
     assert columns["pct_of_total"]["type_config"]["max_value"] == 100
     app = app_factory("source.loc[source.business_unit == 'HMPPS', 'spend_usd'] = -100")
-    columns = json.loads(app.dataframe[0].proto.columns)
+    table = next(table for table in app.dataframe if "pct_of_total" in table.value)
+    columns = json.loads(table.proto.columns)
     assert columns["pct_of_total"]["type_config"]["type"] == "number"
-    assert (app.dataframe[0].value.pct_of_total < 0).any()
+    assert (table.value.pct_of_total < 0).any()
     assert any("outside 0-100%" in item.value for item in app.info)
 
 
 def test_zero_cost_and_unavailable_tagging(app_factory):
     app = app_factory("source['spend_usd'] = 0\nsource['is_taggable_product'] = False")
-    assert app.dataframe[0].value.pct_of_total.isna().all()
+    assert next(table.value for table in app.dataframe if "pct_of_total" in table.value).pct_of_total.isna().all()
     coverage = next(table.value for table in app.dataframe if "pct_tagged" in table.value)
     assert coverage.pct_tagged.isna().all()
-    assert len(app.get("plotly_chart")) == 4
+    assert [trace["type"] for trace in chart_traces(app)] == ["scatter", "bar", "bar"]
+    assert sum("can't be shown as parts of a whole" in item.value for item in app.info) == 2
     assert any("Tagging coverage is unavailable" in item.value for item in app.info)
     assert any("shown as blank" in item.value for item in app.info)
 
@@ -189,7 +205,7 @@ def test_single_month_and_unavailable_month_reset(app_factory):
 def test_history_availability_and_forecast_placeholder(app_factory):
     app = app_factory()
     assert [tab.label for tab in app.tabs] == [
-        "Monthly spend", "Year-to-date", "Spend trend", "Forecast",
+        "Year-to-date", "Spend trend", "Forecast",
         "Tagging coverage", "By account / namespace", "By service type",
     ]
     metrics = {metric.label: metric.value for metric in app.metric}
@@ -237,7 +253,54 @@ def test_single_month_trend_and_april_ytd(app_factory):
     app = app_factory("source = source[source.billing_period == '2026-09'].assign(billing_period='2026-04')")
     assert any("A spend trend is not yet available" in item.value for item in app.info)
     assert next(metric.value for metric in app.metric if metric.label == "YTD spend (USD)") == "$1,550.00"
-    assert len(app.get("plotly_chart")) == 4
+    assert [trace["type"] for trace in chart_traces(app)] == ["indicator"] * 7 + ["treemap", "pie"]
+
+
+def test_chart_types_are_diversified(app_factory):
+    app = app_factory()
+    traces = chart_traces(app)
+    assert [trace["type"] for trace in traces] == ["scatter"] + ["indicator"] * 7 + ["treemap", "pie"]
+    source = read_hosting_csv(SAMPLE)
+    coverage = tagging_coverage(source[source.billing_period == "2026-09"])
+    dials = traces[1:8]
+    assert [dial["title"]["text"] for dial in dials] == coverage.tag.tolist()
+    assert [dial["value"] for dial in dials] == pytest.approx(coverage.pct_tagged.tolist())
+    assert all(dial["gauge"]["axis"]["range"] == [0, 100] for dial in dials)
+    treemap, donut = traces[8], traces[9]
+    top_level = [value for value, parent in zip(decoded(treemap["values"]), treemap["parents"]) if parent == ""]
+    assert sum(top_level) == pytest.approx(1550)
+    assert {"OCTO", "HMPPS", "example-platform-prod", "example-probation-dev"} <= set(treemap["labels"])
+    colours = dict(zip(treemap["labels"], treemap["marker"]["colors"]))
+    assert [colours[unit] for unit in ("OCTO", "HMPPS", "untagged")] == ["#12436D", "#28A197", "#801650"]
+    service_table = next(table.value for table in app.dataframe if {"service_type", "pct_of_total"} <= set(table.value))
+    assert donut["labels"] == service_table.service_type.tolist()
+    assert donut["text"] == [f"{value:.1f}%" for value in service_table.pct_of_total]
+    assert donut["hole"] == 0.55
+
+
+def test_donut_groups_small_service_types(app_factory):
+    app = app_factory(
+        "import pandas as pd\n"
+        "products = ['Amazon Elastic Compute Cloud', 'Amazon Relational Database Service', "
+        "'Amazon Simple Storage Service', 'Amazon Virtual Private Cloud', 'AWS CloudTrail', "
+        "'AmazonCloudWatch', 'AWS Glue', 'Amazon SageMaker']\n"
+        "row = source[source.billing_period == '2026-09'].iloc[[0]]\n"
+        "source = pd.concat([row.assign(product_name=name, spend_usd=80.0 - 10 * index) "
+        "for index, name in enumerate(products)], ignore_index=True)"
+    )
+    donut = next(trace for trace in chart_traces(app) if trace["type"] == "pie")
+    assert donut["labels"] == [
+        "Compute", "Database", "Storage", "Networking", "Security & governance", "Remaining service types (3)",
+    ]
+    assert donut["text"] == ["22.2%", "19.4%", "16.7%", "13.9%", "11.1%", "16.7%"]
+    assert decoded(donut["values"]) == pytest.approx([80, 70, 60, 50, 40, 60])
+    assert len(set(donut["marker"]["colors"][:len(donut["labels"])])) == 6
+
+
+def test_part_to_whole_charts_fall_back_for_credits(app_factory):
+    app = app_factory("source.loc[source.business_unit == 'HMPPS', 'spend_usd'] = -100")
+    assert [trace["type"] for trace in chart_traces(app)] == ["scatter"] + ["indicator"] * 7 + ["bar", "bar"]
+    assert sum("can't be shown as parts of a whole" in item.value for item in app.info) == 2
 
 
 def test_service_breakdown_shows_all_namespaces_without_local_filters(app_factory):

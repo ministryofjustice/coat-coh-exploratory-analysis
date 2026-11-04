@@ -10,6 +10,7 @@ from hosting_report import (
     ALL_BUSINESS_UNITS,
     filter_view,
     financial_year_spend,
+    largest_with_remainder,
     latest_month,
     monthly_spend,
     service_type,
@@ -180,6 +181,19 @@ def test_namespace_service_type_shares():
     assert out.spend_usd.sum() == 150
     assert out.pct_of_namespace.tolist() == pytest.approx([75, 25, 100])
     assert out.service_type.tolist() == ["Compute", "Storage", "Other"]
+
+
+def test_largest_with_remainder_groups_small_categories():
+    data = pd.DataFrame({
+        "service_type": list("ABCDEFGH"),
+        "spend_usd": [40.0, 20, 10, 10, 8, 6, 6, 0],
+        "pct_of_total": [40.0, 20, 10, 10, 8, 6, 6, 0],
+    })
+    out = largest_with_remainder(data, "service_type", 6, "Remaining")
+    assert out.service_type.tolist() == ["A", "B", "C", "D", "E", "Remaining (2)"]
+    assert out.spend_usd.tolist() == [40, 20, 10, 10, 8, 12]
+    assert out.pct_of_total.sum() == pytest.approx(100)
+    assert largest_with_remainder(data.head(6), "service_type", 6, "Remaining").service_type.tolist() == list("ABCDEF")
 
 
 def test_spend_by_service_type(df):

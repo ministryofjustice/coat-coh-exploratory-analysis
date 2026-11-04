@@ -146,6 +146,19 @@ def spend_by_service_type(view: pd.DataFrame) -> pd.DataFrame:
     return _spend_by(view.assign(service_type=view["product_name"].map(service_type)), ["service_type"])
 
 
+def largest_with_remainder(data: pd.DataFrame, category: str, limit: int, remainder_label: str) -> pd.DataFrame:
+    positive = data[data["spend_usd"] > 0].sort_values("spend_usd", ascending=False, kind="stable")
+    if len(positive) <= limit:
+        return positive.reset_index(drop=True)
+    rest = positive.iloc[limit - 1:]
+    remainder = pd.DataFrame({
+        category: [f"{remainder_label} ({len(rest)})"],
+        "spend_usd": [rest["spend_usd"].sum()],
+        "pct_of_total": [round(rest["pct_of_total"].sum(), 1)],
+    })
+    return pd.concat([positive.iloc[:limit - 1], remainder], ignore_index=True)
+
+
 def spend_by_account_service_type(view: pd.DataFrame) -> pd.DataFrame:
     typed = view.assign(service_type=view["product_name"].map(service_type))
     out = typed.groupby(["account_name", "service_type"], as_index=False)["spend_usd"].sum()
