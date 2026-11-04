@@ -56,7 +56,7 @@ CSS = """
 /* Replace Streamlit's fixed toolbar/header with the MoJ service header. */
 [data-testid="stHeader"] {
   background: transparent;
-  top: 5rem;
+  top: 4.5rem;
 }
 
 [data-testid="stToolbarActions"],
@@ -66,74 +66,21 @@ CSS = """
 }
 
 #moj-header-root {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  z-index: 999999 !important;
-  width: 100% !important;
-  background-color: #0b0c0c !important;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 999999;
 }
 
-.moj-header {
-  background-color: #0b0c0c !important;
-  color: white !important;
-  padding: 0.75rem 1rem !important;
-  border-bottom: 4px solid #1d70b8 !important;
-  width: 100% !important;
-  box-sizing: border-box !important;
-}
-
-.moj-header__container {
-  display: flex !important;
-  align-items: center !important;
-  padding: 0 2rem !important;
-  max-width: 100% !important;
-  width: 100% !important;
-}
-
-.moj-header__logo {
-  display: flex !important;
-  align-items: center !important;
-  gap: 1rem !important;
-  width: 100% !important;
-}
-
-.moj-header__logotype-crest {
-  width: 40px !important;
-  height: 40px !important;
-  display: block !important;
-  flex-shrink: 0 !important;
-}
-
-.moj-header__link {
-  color: white !important;
-  text-decoration: none !important;
-  font-size: 1.125rem !important;
-  font-weight: 700 !important;
-  display: inline !important;
-}
-
-.moj-header__link--organisation-name {
-  font-size: 1rem !important;
-  font-weight: 400 !important;
-  margin: 0 0.5rem !important;
-}
-
-.moj-header__link--service-name {
-  text-decoration: underline !important;
-  font-size: 1rem !important;
-  font-weight: 700 !important;
-  margin-left: 0.5rem !important;
-}
 
 /* The sidebar is itself a fixed-position element, so it must be offset
    using `top`/`height`, not `margin-top`, or it will render underneath
    the header instead of being pushed down by it. */
 [data-testid="stSidebar"] {
   position: fixed;
-  top: 5rem;
-  height: calc(100dvh - 5rem);
+  top: 4.5rem;
+  height: calc(100dvh - 4.5rem);
 }
 
 [data-testid="stMainBlockContainer"] {
@@ -242,7 +189,7 @@ def render_header() -> None:
         <a class="moj-header__link moj-header__link--organisation-name" href="https://www.gov.uk/government/organisations/ministry-of-justice">
           Ministry of Justice
         </a>
-        <a class="moj-header__link moj-header__link--service-name" href="/">
+        <a class="moj-header__link moj-header__link--service-name" href="/showback-report/">
           {DASHBOARD_NAME}
         </a>
       </div>
