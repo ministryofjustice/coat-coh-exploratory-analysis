@@ -17,6 +17,7 @@ from hosting_report import (
     spend_by_namespace_service_type,
     spend_by_service_type,
     tagging_coverage,
+    top_with_remainder,
 )
 from local_data_input import manual_file_upload
 from render_html import render_footer, render_header
@@ -253,27 +254,6 @@ def donut_chart(data, category, remainder_label, description):
     )
 
 
-def treemap_chart(data, description):
-    positive = data[data["spend_usd"] > 0]
-    ranked = positive.groupby("business_unit")["spend_usd"].sum().sort_values(ascending=False).index
-    # Smaller business units share a neutral grey so no palette colour is reused.
-    colours = {unit: CATEGORY_COLOURS[rank] if rank < len(CATEGORY_COLOURS) else "#b1b4b6" for rank, unit in enumerate(ranked)}
-    fig = px.treemap(
-        positive, path=["business_unit", "account_name"], values="spend_usd",
-        color="business_unit", color_discrete_map=colours,
-    )
-    fig.update_traces(
-        texttemplate="%{label}<br>%{value:$,.0f}",
-        hovertemplate="%{label}<br>%{value:$,.2f}<extra></extra>",
-        root_color="#f3f2f1",
-        marker=dict(line=dict(color="#ffffff", width=1)),
-    )
-    show_chart(
-        fig, description, height=520, margin=dict(l=10, r=10, t=30, b=10),
-        uniformtext=dict(minsize=10, mode="hide"),
-    )
-
-
 def money(value):
     return f"${value:,.0f}"
 
@@ -396,34 +376,17 @@ with tab_tags:
 # -----------------------------
 with tab_account:
     by_account = spend_by_account(view)
-    top_accounts = (
-    by_account.groupby("account_name", as_index=False)["spend_usd"]
-    .sum()
-    .sort_values("spend_usd", ascending=False)
-    .head(15)
-)
+    account_totals = (
+        by_account.groupby("account_name", as_index=False)["spend_usd"]
+        .sum()
+        .sort_values("spend_usd", ascending=False)
+    )
+    top_accounts = top_with_remainder(account_totals, "account_name", 16, "Other accounts")
     st.subheader("Spend by account")
-    if part_to_whole(by_account["spend_usd"]):
-        largest = top_accounts.iloc[0]
-        treemap_chart(
-            by_account,
-            f"Treemap of Hosting spend for {month}, filtered to {business_unit}: tiles are grouped by business unit "
-            f"and sized by account spend. Largest account: {largest.account_name} at {money(largest.spend_usd)}. "
-            "The tables below contain the values.",
-        )
-    else:
-        st.info(PART_TO_WHOLE_FALLBACK)
-        bar_chart(
-            top_accounts, "account_name", "spend_usd", "Spend (USD)", money,
-            f"Up to 15 highest-spending accounts for {month}, filtered to {business_unit}. "
-            "Spend is combined across the selected business units, in US dollars. "
-            "The table below contains the same account totals.",
-        )
-    st.subheader("Accounts: 15 largest by spend")
-    report_table(
-        top_accounts,
-        f"Top 15 account totals in USD for {month}, {business_unit}, ordered highest first.",
-        "top-accounts",
+    bar_chart(
+        top_accounts, "account_name", "spend_usd", "Spend (USD)", money,
+        f"Bar chart of Hosting spend by account for {month}, filtered to {business_unit}, highest first: "
+        + "; ".join(f"{row.account_name} {money(row.spend_usd)}" for row in top_accounts.itertuples()) + ".",
     )
     st.subheader("All accounts")
     report_table(

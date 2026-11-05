@@ -21,6 +21,7 @@ from hosting_report import (
     spend_by_namespace_service_type,
     spend_by_service_type,
     tagging_coverage,
+    top_with_remainder,
 )
 
 SAMPLE = Path(__file__).parent / "sample_hosting.csv"
@@ -194,6 +195,14 @@ def test_largest_with_remainder_groups_small_categories():
     assert out.spend_usd.tolist() == [40, 20, 10, 10, 8, 12]
     assert out.pct_of_total.sum() == pytest.approx(100)
     assert largest_with_remainder(data.head(6), "service_type", 6, "Remaining").service_type.tolist() == list("ABCDEF")
+
+
+def test_top_with_remainder_keeps_credits():
+    data = pd.DataFrame({"account_name": list("ABCDE"), "spend_usd": [-5.0, 30, 0, 20, 10]})
+    out = top_with_remainder(data, "account_name", 3, "Other accounts")
+    assert out.account_name.tolist() == ["B", "D", "Other accounts (3)"]
+    assert out.spend_usd.tolist() == [30, 20, 5]
+    assert top_with_remainder(data, "account_name", 5, "Other").account_name.tolist() == list("BDECA")
 
 
 def test_spend_by_service_type(df):

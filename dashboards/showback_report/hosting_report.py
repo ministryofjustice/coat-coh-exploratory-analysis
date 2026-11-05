@@ -159,6 +159,19 @@ def largest_with_remainder(data: pd.DataFrame, category: str, limit: int, remain
     return pd.concat([positive.iloc[:limit - 1], remainder], ignore_index=True)
 
 
+def top_with_remainder(data: pd.DataFrame, category: str, limit: int, remainder_label: str) -> pd.DataFrame:
+    """Like largest_with_remainder, but keeps zero and negative spend so bar charts can show credits."""
+    ranked = data.sort_values("spend_usd", ascending=False, kind="stable", ignore_index=True)
+    if len(ranked) <= limit:
+        return ranked
+    rest = ranked.iloc[limit - 1:]
+    remainder = pd.DataFrame({
+        category: [f"{remainder_label} ({len(rest)})"],
+        "spend_usd": [rest["spend_usd"].sum()],
+    })
+    return pd.concat([ranked.iloc[:limit - 1], remainder], ignore_index=True)
+
+
 def spend_by_account_service_type(view: pd.DataFrame) -> pd.DataFrame:
     typed = view.assign(service_type=view["product_name"].map(service_type))
     out = typed.groupby(["account_name", "service_type"], as_index=False)["spend_usd"].sum()
