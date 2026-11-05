@@ -1,233 +1,47 @@
-import json
-from pathlib import Path
-
-import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
-import numpy as np
+
 
 from auth import require_auth0_login
-from s3_data import download_csv_from_s3
-from render_html import render_footer, render_header
-from config import APP_ENV
+from config import APP_ENV, DASHBOARD_NAME
+from hosting_data import MissingColumnsError, read_hosting_csv
+from hosting_report import (
+    ALL_BUSINESS_UNITS,
+    filter_view,
+    financial_year_spend,
+    largest_with_remainder,
+    monthly_spend,
+    spend_by_account,
+    spend_by_namespace,
+    spend_by_namespace_service_type,
+    spend_by_service_type,
+    tagging_coverage,
+)
 from local_data_input import manual_file_upload
+from render_html import render_footer, render_header
 
 st.set_page_config(
-    page_title="AWS Cost Optimization Hub Dashboard",
+    page_title=DASHBOARD_NAME,
     page_icon="💰",
     layout="wide",
 )
 
 render_header()
-render_footer()
 
 if APP_ENV:
     require_auth0_login()
 
-## Example of Athena interface
-
-# from services.athena_service import AthenaService
-# athena_service = AthenaService()
-# results = athena_service.run_query("cloud_optimisation_datamarts", "SELECT * FROM fct_daily_cost LIMIT 10")
-# print(results)
-
-st.title("AWS Cost Optimization Hub Recommendations Dashboard")
-st.caption("Local CORA-style dashboard for AWS Cost Optimization Hub CSV exports")
-
-# Constants
-
-SAVINGS_CATEGORY_ORDER = [
-    ">=$1000/month",
-    ">=$500/month and <$1000/month",
-    ">=$100/month and <$500/month",
-    ">=$1/month and <$100/month",
-    "<$1/month",
-    "Unknown",
-]
-
-SAVINGS_CATEGORY_COLORS = {
-    ">=$1000/month": "#1E8449",
-    ">=$500/month and <$1000/month": "#27AE60",
-    ">=$100/month and <$500/month": "#F1C40F",
-    ">=$1/month and <$100/month": "#E67E22",
-    "<$1/month": "#C0392B",
-    "Unknown": "#95A5A6",
-}
-
-# Effort factor mappings
-EFFORT_FACTOR_MAP = {
-    "Low": 1,
-    "Medium": 2,
-    "High": 6,
-    "VeryHigh": 10,
-}
-
-
-def get_effort_factor(effort):
-    """Get effort factor from implementation effort string"""
-    if pd.isna(effort):
-        return 1
-    effort_str = str(effort).strip()
-    return EFFORT_FACTOR_MAP.get(effort_str, 1)
-
-
-def get_recommendation_count_factor(count):
-    """Map recommendation count to factor"""
-    if count <= 100:
-        return 1.0
-    elif count <= 500:
-        return 1.5
-    elif count <= 1500:
-        return 2.0
-    else:
-        return 3.0
-
-
-def calculate_priority_score(row):
-    """Calculate priority score based on formula:
-    Priority Score = (TotalEstimatedMonthlySavings^1.2) / ((effortFactor × recommendationCountFactor)^2)
-    """
-    savings = row.get('totalEstimatedMonthlySavings', 0)
-    effort_factor = row.get('effortFactor', 1)
-    count_factor = row.get('recommendationCountFactor', 1.0)
-    
-    if savings <= 0 or effort_factor == 0 or count_factor == 0:
-        return 0
-    
-    numerator = savings ** 1.2
-    denominator = (effort_factor * count_factor) ** 2
-    
-    return numerator / denominator if denominator > 0 else 0
-
-
-# -----------------------------
-# Helpers
-# -----------------------------
-def classify_savings(value) -> str:
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return "Unknown"
-
-    if v >= 1000:
-        return ">=$1000/month"
-    elif v >= 500:
-        return ">=$500/month and <$1000/month"
-    elif v >= 100:
-        return ">=$100/month and <$500/month"
-    elif v >= 1:
-        return ">=$1/month and <$100/month"
-    else:
-        return "<$1/month"
-
-
-def format_currency(value: float, currency: str = "USD") -> str:
-    symbol = "$" if currency == "USD" else f"{currency} "
-    return f"{symbol}{value:,.2f}"
-
-
-def coerce_bool_series(series: pd.Series) -> pd.Series:
-    if series.dtype == bool:
-        return series
-    mapping = {
-        "true": True,
-        "false": False,
-        "True": True,
-        "False": False,
-        True: True,
-        False: False,
-        1: True,
-        0: False,
-    }
-    return series.map(lambda x: mapping.get(x, x)).fillna(False).astype(bool)
-
-
-def parse_tags(value):
-    if pd.isna(value):
-        return {}
-    if isinstance(value, list):
-        return {
-            item.get("key"): item.get("value")
-            for item in value
-            if isinstance(item, dict) and "key" in item
-        }
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return {
-                    item.get("key"): item.get("value")
-                    for item in parsed
-                    if isinstance(item, dict) and "key" in item
-                }
-        except Exception:
-            return {}
-    return {}
+st.title(DASHBOARD_NAME)
+st.caption(
+    "Cost in the AWS cost category service_area = Hosting. "
+    "Net cost, excluding tax, discount and fee lines."
+)
 
 
 @st.cache_data
-def load_data(uploaded_file):
-    df = pd.read_csv(uploaded_file)
-
-    numeric_columns = [
-        "estimatedMonthlySavings",
-        "estimatedMonthlyCost",
-        "estimatedSavingsPercentage",
-        "recommendationLookbackPeriodInDays",
-    ]
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    if "lastRefreshTimestamp" in df.columns:
-        df["lastRefreshTimestamp"] = pd.to_datetime(
-            df["lastRefreshTimestamp"], errors="coerce", utc=True
-        )
-
-    for col in ["restartNeeded", "rollbackPossible"]:
-        if col in df.columns:
-            df[col] = coerce_bool_series(df[col])
-
-    df["savingsValueCategory"] = df["estimatedMonthlySavings"].apply(classify_savings)
-    df["estimatedAnnualSavings"] = df["estimatedMonthlySavings"].fillna(0) * 12
-    
-    # Add effort factor column
-    df["effortFactor"] = df["implementationEffort"].apply(get_effort_factor)
-
-    if "tags" in df.columns:
-        df["parsedTags"] = df["tags"].apply(parse_tags)
-        df["tag_owner"] = df["parsedTags"].apply(lambda d: d.get("owner"))
-        df["tag_environment_name"] = df["parsedTags"].apply(lambda d: d.get("environment-name"))
-        df["tag_is_production"] = df["parsedTags"].apply(lambda d: d.get("is-production"))
-        df["tag_application"] = df["parsedTags"].apply(lambda d: d.get("application"))
-        df["tag_business_unit"] = df["parsedTags"].apply(lambda d: d.get("business-unit"))
-        df["tag_source_code"] = df["parsedTags"].apply(lambda d: d.get("source-code"))
-
-    return df
-
-
-def make_bar_chart(data, x, y, title, color=None, orientation="v"):
-    if data.empty:
-        return None
-    fig = px.bar(
-        data,
-        x=x if orientation == "v" else y,
-        y=y if orientation == "v" else x,
-        color=color,
-        orientation=orientation,
-        title=title,
-        text_auto=".2s",
-    )
-    fig.update_layout(margin=dict(l=20, r=20, t=50, b=20), height=420)
-    return fig
-
-
-def make_treemap(data, path, values, title):
-    if data.empty:
-        return None
-    fig = px.treemap(data, path=path, values=values, title=title)
-    fig.update_layout(margin=dict(l=10, r=10, t=50, b=10), height=450)
-    return fig
+def load_hosting_csv(uploaded_file):
+    return read_hosting_csv(uploaded_file)
 
 
 # -----------------------------
@@ -235,868 +49,428 @@ def make_treemap(data, path, values, title):
 # -----------------------------
 csv_file = manual_file_upload()
 
-df = load_data(csv_file)
+try:
+    with st.spinner("Loading and validating the Hosting CSV..."):
+        df = load_hosting_csv(csv_file)
+except MissingColumnsError as exc:
+    st.error("The CSV is missing these columns:")
+    st.write(exc.missing)
+    st.stop()
+except ValueError as exc:
+    st.error(f"Could not read the CSV: {exc}")
+    st.stop()
 
 if df.empty:
     st.warning("The uploaded CSV contains no rows.")
     st.stop()
 
-currency = (
-    df["currencyCode"].dropna().iloc[0]
-    if "currencyCode" in df.columns and df["currencyCode"].dropna().any()
-    else "USD"
-)
-
 # -----------------------------
-# Sidebar filters
+# Month and Business Unit filter
 # -----------------------------
 st.sidebar.header("Filters")
+months = sorted(df["billing_period"].unique(), reverse=True)
+if st.session_state.get("billing_month") not in months:
+    st.session_state["billing_month"] = months[0]
+month = st.sidebar.selectbox("Billing month", months, key="billing_month")
+if len(months) == 1:
+    st.sidebar.caption(f"Available reporting month: {month}")
+business_units = [ALL_BUSINESS_UNITS] + sorted(df.loc[df["billing_period"] == month, "business_unit"].unique())
+if st.session_state.get("business_unit") not in business_units:
+    st.session_state["business_unit"] = ALL_BUSINESS_UNITS
+business_unit = st.sidebar.selectbox("Business Unit", business_units, key="business_unit")
 
-def multiselect_filter(column_name, label=None):
-    if column_name not in df.columns:
-        return None
-    options = sorted([x for x in df[column_name].dropna().unique().tolist()])
-    return st.sidebar.multiselect(label or column_name, options, default=options)
+view = filter_view(df, month, business_unit)
 
+account_options = sorted(view["account_name"].unique())
+namespace_options = sorted(view["tag_namespace"].unique())
+for filter_key, options in (
+    ("account_filter", account_options),
+    ("namespace_filter", namespace_options),
+):
+    st.session_state[filter_key] = [
+        value for value in st.session_state.get(filter_key, []) if value in options
+    ]
+selected_accounts = st.sidebar.multiselect(
+    "Accounts", account_options, key="account_filter", placeholder="All accounts"
+)
+selected_namespaces = st.sidebar.multiselect(
+    "Namespaces", namespace_options, key="namespace_filter", placeholder="All namespaces"
+)
+history = df
+if business_unit != ALL_BUSINESS_UNITS:
+    history = history[history["business_unit"] == business_unit]
+if selected_accounts:
+    history = history[history["account_name"].isin(selected_accounts)]
+if selected_namespaces:
+    history = history[history["tag_namespace"].isin(selected_namespaces)]
+view = history[history["billing_period"] == month]
 
-selected_accounts = multiselect_filter("accountName", "Account")
-selected_regions = multiselect_filter("region", "Region")
-selected_resource_types = multiselect_filter("currentResourceType", "Current resource type")
-selected_action_types = multiselect_filter("actionType", "Action type")
-selected_efforts = multiselect_filter("implementationEffort", "Implementation effort")
-selected_sources = multiselect_filter("source", "Source")
-selected_savings_bands = multiselect_filter("savingsValueCategory", "Savings value category")
+account_scope = ", ".join(selected_accounts) or "All accounts"
+namespace_scope = ", ".join(selected_namespaces) or "All namespaces"
+st.caption(
+    f"Month: {month}. Business Unit: {business_unit}. "
+    f"Accounts: {account_scope}. Namespaces: {namespace_scope}. {len(view):,} rows."
+)
 
-filtered_df = df.copy()
+if view.empty:
+    st.info("No rows match the selected filters. Clear an account or namespace selection, or choose another month or business unit.")
+    st.stop()
 
-filter_map = {
-    "accountName": selected_accounts,
-    "region": selected_regions,
-    "currentResourceType": selected_resource_types,
-    "actionType": selected_action_types,
-    "implementationEffort": selected_efforts,
-    "source": selected_sources,
-    "savingsValueCategory": selected_savings_bands,
+# -----------------------------
+# Charts and table formats
+# -----------------------------
+# GSS accessible categorical palette.
+CATEGORY_COLOURS = ["#12436D", "#28A197", "#801650", "#F46A25", "#3D3D3D", "#A285D1"]
+BAR_COLOUR = CATEGORY_COLOURS[0]
+PART_TO_WHOLE_FALLBACK = (
+    "Net credits or a zero total can't be shown as parts of a whole, so a bar chart is shown instead."
+)
+TABLE_COLUMNS = {
+    "billing_period": "Billing month",
+    "availability": "Data availability",
+    "business_unit": "Business unit",
+    "account_name": "Account",
+    "tag_namespace": "Namespace",
+    "service_type": "Service type",
+    "tag": "Tag",
+    "spend_usd": st.column_config.NumberColumn(
+        "Spend (USD)", format="dollar"
+    ),
+    "pct_of_total": st.column_config.ProgressColumn(
+        "Share of total (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
+    ),
+    "pct_of_account": st.column_config.ProgressColumn(
+        "Share of account spend (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
+    ),
+    "pct_of_namespace": st.column_config.ProgressColumn(
+        "Share of namespace spend (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
+    ),
+    "tagged_usage_cost_usd": st.column_config.NumberColumn(
+        "Tagged usage cost (USD)", format="dollar"
+    ),
+    "taggable_usage_cost_usd": st.column_config.NumberColumn(
+        "Taggable usage cost (USD)", format="dollar"
+    ),
+    "pct_tagged": st.column_config.ProgressColumn(
+        "Tagging coverage (%)", format="%.1f%%", min_value=0, max_value=100, color="#1d70b8"
+    ),
 }
 
-for column, selected in filter_map.items():
-    if selected is not None and len(selected) > 0:
-        filtered_df = filtered_df[filtered_df[column].isin(selected)]
 
-# -----------------------------
-# KPI row
-# -----------------------------
-total_recommendations = len(filtered_df)
-total_monthly_savings = filtered_df["estimatedMonthlySavings"].fillna(0).sum()
-total_annual_savings = filtered_df["estimatedAnnualSavings"].fillna(0).sum()
-avg_savings = filtered_df["estimatedMonthlySavings"].fillna(0).mean() if total_recommendations else 0
-total_monthly_cost = filtered_df["estimatedMonthlyCost"].fillna(0).sum()
-
-c1, c2, c3, c4, c5 = st.columns(5)
-c1.metric("Recommendations", f"{total_recommendations:,}")
-c2.metric("Est. Monthly Savings", format_currency(total_monthly_savings, currency))
-c3.metric("Est. Annual Savings", format_currency(total_annual_savings, currency))
-c4.metric("Avg Savings / Recommendation", format_currency(avg_savings, currency))
-c5.metric("Est. Monthly Cost", format_currency(total_monthly_cost, currency))
-
-st.divider()
-
-# -----------------------------
-# Summary tables for charts
-# -----------------------------
-savings_by_account = (
-    filtered_df.groupby("accountName", dropna=False, as_index=False)["estimatedMonthlySavings"]
-    .sum()
-    .sort_values("estimatedMonthlySavings", ascending=False)
-)
-
-savings_by_region = (
-    filtered_df.groupby("region", dropna=False, as_index=False)["estimatedMonthlySavings"]
-    .sum()
-    .sort_values("estimatedMonthlySavings", ascending=False)
-)
-
-savings_by_resource_type = (
-    filtered_df.groupby("currentResourceType", dropna=False, as_index=False)["estimatedMonthlySavings"]
-    .sum()
-    .sort_values("estimatedMonthlySavings", ascending=False)
-)
-
-savings_by_action = (
-    filtered_df.groupby("actionType", dropna=False, as_index=False)["estimatedMonthlySavings"]
-    .sum()
-    .sort_values("estimatedMonthlySavings", ascending=False)
-)
-
-recommendations_by_effort = (
-    filtered_df.groupby("implementationEffort", dropna=False, as_index=False)["recommendationId"]
-    .count()
-    .rename(columns={"recommendationId": "recommendationCount"})
-    .sort_values("recommendationCount", ascending=False)
-)
-
-recommendations_by_source = (
-    filtered_df.groupby("source", dropna=False, as_index=False)["recommendationId"]
-    .count()
-    .rename(columns={"recommendationId": "recommendationCount"})
-    .sort_values("recommendationCount", ascending=False)
-)
-
-recommendations_by_savings_band = (
-    filtered_df.groupby("savingsValueCategory", dropna=False, as_index=False)["recommendationId"]
-    .count()
-    .rename(columns={"recommendationId": "recommendationCount"})
-)
-
-triple_agg = (
-    filtered_df.groupby(
-        ["currentResourceType", "actionType", "savingsValueCategory"],
-        dropna=False,
-        as_index=False,
-    )["recommendationId"]
-    .count()
-    .rename(columns={"recommendationId": "recommendationCount"})
-    .sort_values("recommendationCount", ascending=False)
-)
-
-triple_savings_agg = (
-    filtered_df.groupby(
-        ["currentResourceType", "actionType", "savingsValueCategory"],
-        dropna=False,
-        as_index=False,
-    )["estimatedMonthlySavings"]
-    .sum()
-    .rename(columns={"estimatedMonthlySavings": "totalEstimatedMonthlySavings"})
-    .sort_values("totalEstimatedMonthlySavings", ascending=False)
-)
-
-monthly_savings_by_savings_band = (
-    filtered_df.groupby("savingsValueCategory", dropna=False, as_index=False)["estimatedMonthlySavings"]
-    .sum()
-    .rename(columns={"estimatedMonthlySavings": "totalEstimatedMonthlySavings"})
-)
-
-savings_by_category_and_effort = (
-    filtered_df.groupby(
-        ["savingsValueCategory", "implementationEffort"],
-        dropna=False,
-        as_index=False,
-    )["estimatedMonthlySavings"]
-    .sum()
-    .rename(columns={"estimatedMonthlySavings": "totalEstimatedMonthlySavings"})
-)
-
-# Create priority score aggregation - CORRECT: Average effort factors properly grouped
-priority_agg = (
-    filtered_df.groupby(
-        ["currentResourceType", "actionType", "savingsValueCategory"],
-        dropna=False,
-        as_index=False,
-    ).agg({
-        "estimatedMonthlySavings": "sum",
-        "recommendationId": "count",
-        "effortFactor": "mean",  # Average effort factor for this specific combination
-    })
-    .rename(columns={
-        "estimatedMonthlySavings": "totalEstimatedMonthlySavings",
-        "recommendationId": "recommendationCount",
-        "effortFactor": "effortFactor",
-    })
-)
-
-# Calculate recommendation count factor for each group
-priority_agg["recommendationCountFactor"] = priority_agg["recommendationCount"].apply(
-    get_recommendation_count_factor
-)
-
-# Calculate priority score
-priority_agg["priorityScore"] = priority_agg.apply(calculate_priority_score, axis=1)
-
-# Sort by priority score
-priority_agg = priority_agg.sort_values("priorityScore", ascending=False)
-
-# Charts: CORA-style overview
-row1_col1, row1_col2 = st.columns(2)
-with row1_col1:
-    fig = make_bar_chart(
-        savings_by_account.head(15),
-        x="accountName",
-        y="estimatedMonthlySavings",
-        title="Estimated Monthly Savings by Account",
-    )
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
-
-with row1_col2:
-    fig = make_bar_chart(
-        savings_by_resource_type,
-        x="currentResourceType",
-        y="estimatedMonthlySavings",
-        title="Estimated Monthly Savings by Current Resource Type",
-    )
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
-
-row2_col1, row2_col2 = st.columns(2)
-with row2_col1:
-    fig = make_bar_chart(
-        savings_by_action,
-        x="actionType",
-        y="estimatedMonthlySavings",
-        title="Estimated Monthly Savings by Action Type",
-    )
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
-
-with row2_col2:
-    fig = make_bar_chart(
-        recommendations_by_effort,
-        x="implementationEffort",
-        y="recommendationCount",
-        title="Recommendation Count by Implementation Effort",
-    )
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
-
-# Recommendation count by Savings Value Category
-
-st.subheader("Recommendation count by Savings Value Category")
-
-pie_df = recommendations_by_savings_band.copy()
-
-if not pie_df.empty:
-    savings_category_order = [
-        ">=$1000/month",
-        ">=$500/month and <$1000/month",
-        ">=$100/month and <$500/month",
-        ">=$1/month and <$100/month",
-        "<$1/month",
-        "Unknown",
-    ]
-
-    pie_df["savingsValueCategory"] = pd.Categorical(
-        pie_df["savingsValueCategory"],
-        categories=savings_category_order,
-        ordered=True,
-    )
-    pie_df = pie_df.sort_values("savingsValueCategory")
-
-    fig = px.pie(
-        pie_df,
-        names="savingsValueCategory",
-        values="recommendationCount",
-        title="Recommendation Count by Savings Value Category",
-        hole=0.35,
-    )
-    fig.update_traces(textposition="inside", textinfo="percent+label+value")
-    fig.update_layout(
-        height=450,
-        margin=dict(l=20, r=20, t=60, b=20),
-        legend_title="Savings Value Category",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("No data available for the selected filters.")
-
-# Recommendation count by Resource Type + Action Type across Savings Value Categories
-
-st.subheader("Recommendation count by Resource Type + Action Type across Savings Value Categories")
-
-triple_panel_df = triple_agg.copy()
-
-if not triple_panel_df.empty:
-    savings_category_order = [
-        ">=$1000/month",
-        ">=$500/month and <$1000/month",
-        ">=$100/month and <$500/month",
-        ">=$1/month and <$100/month",
-        "<$1/month",
-        "Unknown",
-    ]
-
-    triple_panel_df["resourceAction"] = (
-        triple_panel_df["currentResourceType"].fillna("Unknown").astype(str)
-        + " | "
-        + triple_panel_df["actionType"].fillna("Unknown").astype(str)
-    )
-
-    available_categories = [
-        cat for cat in savings_category_order
-        if cat in triple_panel_df["savingsValueCategory"].astype(str).unique()
-    ]
-
-    selected_panel_categories = st.multiselect(
-        "Filter this panel by savings value category",
-        options=available_categories,
-        default=available_categories,
-        key="triple_panel_savings_category_filter",
-    )
-
-    if selected_panel_categories:
-        triple_panel_df = triple_panel_df[
-            triple_panel_df["savingsValueCategory"].astype(str).isin(selected_panel_categories)
-        ]
-
-    if not triple_panel_df.empty:
-        triple_panel_df["savingsValueCategory"] = pd.Categorical(
-            triple_panel_df["savingsValueCategory"],
-            categories=savings_category_order,
-            ordered=True,
-        )
-
-        combo_order = (
-            triple_panel_df.groupby("resourceAction", as_index=False)["recommendationCount"]
-            .sum()
-            .sort_values("recommendationCount", ascending=False)["resourceAction"]
-            .tolist()
-        )
-
-        chart_df = triple_panel_df.sort_values(
-            ["resourceAction", "savingsValueCategory"]
-        )
-
-        fig = px.bar(
-            chart_df,
-            x="resourceAction",
-            y="recommendationCount",
-            color="savingsValueCategory",
-            category_orders={
-                "resourceAction": combo_order,
-                "savingsValueCategory": savings_category_order,
-            },
-            title="Recommendation Count for Each Resource Type / Action Type Combination by Savings Value Category",
-            barmode="stack",
-            text_auto=True,
-        )
-        fig.update_layout(
-            xaxis_title="Current Resource Type | Action Type",
-            yaxis_title="Recommendation Count",
-            legend_title="Savings Value Category",
-            height=550,
-            margin=dict(l=20, r=20, t=60, b=20),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        pivot_df = (
-            triple_panel_df.pivot_table(
-                index=["currentResourceType", "actionType"],
-                columns="savingsValueCategory",
-                values="recommendationCount",
-                aggfunc="sum",
-                fill_value=0,
+def report_table(data, description, report_name):
+    table_data = data.replace([float("inf"), float("-inf")], float("nan"))
+    columns = TABLE_COLUMNS.copy()
+    for column in ("pct_of_total", "pct_of_account", "pct_of_namespace", "pct_tagged"):
+        if column not in table_data:
+            continue
+        within_tolerance = table_data[column].between(-1e-9, 100 + 1e-9)
+        table_data.loc[within_tolerance, column] = table_data.loc[within_tolerance, column].clip(0, 100)
+        values = table_data[column].dropna()
+        if not values.between(0, 100).all():
+            columns[column] = st.column_config.NumberColumn(
+                TABLE_COLUMNS[column]["label"], format="%.1f%%"
             )
-            .reindex(columns=selected_panel_categories, fill_value=0)
-            .reset_index()
-        )
-
-        st.dataframe(
-            pivot_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info("No data available for the selected savings value categories.")
-else:
-    st.info("No data available for the selected filters.")
-
-# Total Estimated Monthly Savings by Savings Value Category
-
-st.subheader("Total Estimated Monthly Savings by Savings Value Category")
-
-savings_pie_df = monthly_savings_by_savings_band.copy()
-
-if not savings_pie_df.empty:
-    savings_category_order = [
-        ">=$1000/month",
-        ">=$500/month and <$1000/month",
-        ">=$100/month and <$500/month",
-        ">=$1/month and <$100/month",
-        "<$1/month",
-        "Unknown",
-    ]
-
-    savings_pie_df["savingsValueCategory"] = pd.Categorical(
-        savings_pie_df["savingsValueCategory"],
-        categories=savings_category_order,
-        ordered=True,
-    )
-    savings_pie_df = savings_pie_df.sort_values("savingsValueCategory")
-
-    fig = px.pie(
-        savings_pie_df,
-        names="savingsValueCategory",
-        values="totalEstimatedMonthlySavings",
-        title="Pie Chart of Total Estimated Monthly Savings by Savings Value Category",
-        hole=0.35,
-    )
-    fig.update_traces(textposition="inside", textinfo="percent+label+value")
-    fig.update_layout(
-        height=450,
-        margin=dict(l=20, r=20, t=60, b=20),
-        legend_title="Savings Value Category",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("No savings data available for the selected filters.")
-
-# Total Estimated Monthly Savings by Resource Type + Action Type across Savings Value Categories
-
-st.subheader("Total Estimated Monthly Savings by Resource Type + Action Type across Savings Value Categories")
-
-triple_savings_panel_df = triple_savings_agg.copy()
-
-if not triple_savings_panel_df.empty:
-    savings_category_order = [
-        ">=$1000/month",
-        ">=$500/month and <$1000/month",
-        ">=$100/month and <$500/month",
-        ">=$1/month and <$100/month",
-        "<$1/month",
-        "Unknown",
-    ]
-
-    triple_savings_panel_df["resourceAction"] = (
-        triple_savings_panel_df["currentResourceType"].fillna("Unknown").astype(str)
-        + " | "
-        + triple_savings_panel_df["actionType"].fillna("Unknown").astype(str)
+            st.info("Percentages outside 0-100% are displayed as numbers rather than bars.")
+        if table_data[column].isna().any():
+            st.info("Some percentages are unavailable and are shown as blank, not zero.")
+    st.dataframe(
+        table_data,
+        hide_index=True,
+        column_config=columns,
+        alt=f"{description} Accounts: {account_scope}. Namespaces: {namespace_scope}.",
     )
 
-    available_savings_categories = [
-        cat for cat in savings_category_order
-        if cat in triple_savings_panel_df["savingsValueCategory"].astype(str).unique()
-    ]
 
-    selected_savings_panel_categories = st.multiselect(
-        "Filter savings panel by savings value category",
-        options=available_savings_categories,
-        default=available_savings_categories,
-        key="triple_savings_panel_savings_category_filter",
-    )
-
-    if selected_savings_panel_categories:
-        triple_savings_panel_df = triple_savings_panel_df[
-            triple_savings_panel_df["savingsValueCategory"].astype(str).isin(
-                selected_savings_panel_categories
-            )
-        ]
-
-    if not triple_savings_panel_df.empty:
-        triple_savings_panel_df["savingsValueCategory"] = pd.Categorical(
-            triple_savings_panel_df["savingsValueCategory"],
-            categories=savings_category_order,
-            ordered=True,
-        )
-
-        combo_order = (
-            triple_savings_panel_df.groupby("resourceAction", as_index=False)[
-                "totalEstimatedMonthlySavings"
-            ]
-            .sum()
-            .sort_values("totalEstimatedMonthlySavings", ascending=False)["resourceAction"]
-            .tolist()
-        )
-
-        chart_df = triple_savings_panel_df.sort_values(
-            ["resourceAction", "savingsValueCategory"]
-        )
-
-        fig = px.bar(
-            chart_df,
-            x="resourceAction",
-            y="totalEstimatedMonthlySavings",
-            color="savingsValueCategory",
-            category_orders={
-                "resourceAction": combo_order,
-                "savingsValueCategory": savings_category_order,
-            },
-            title="Total Estimated Monthly Savings for Each Resource Type / Action Type Combination by Savings Value Category",
-            barmode="stack",
-            text_auto=".2s",
-        )
-        fig.update_layout(
-            xaxis_title="Current Resource Type | Action Type",
-            yaxis_title="Total Estimated Monthly Savings",
-            legend_title="Savings Value Category",
-            height=550,
-            margin=dict(l=20, r=20, t=60, b=20),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        pivot_df = (
-            triple_savings_panel_df.pivot_table(
-                index=["currentResourceType", "actionType"],
-                columns="savingsValueCategory",
-                values="totalEstimatedMonthlySavings",
-                aggfunc="sum",
-                fill_value=0,
-            )
-            .reindex(columns=selected_savings_panel_categories, fill_value=0)
-            .reset_index()
-        )
-
-        st.dataframe(
-            pivot_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-    else:
-        st.info("No data available for the selected savings value categories.")
-else:
-    st.info("No savings data available for the selected filters.")
-
-# Total Savings by Savings Value Category and Implementation Effort
-
-st.subheader("Total Savings by Savings Value Category and Implementation Effort")
-
-savings_effort_df = savings_by_category_and_effort.copy()
-
-if not savings_effort_df.empty:
-    savings_effort_df["implementationEffort"] = (
-        savings_effort_df["implementationEffort"]
-        .fillna("Unknown")
-        .astype(str)
-        .str.strip()
-    )
-
-    savings_effort_df = savings_effort_df.sort_values(
-        ["savingsValueCategory", "implementationEffort"]
-    )
-
+def bar_chart(data, category, value, value_label, text_format, description):
     fig = px.bar(
-        savings_effort_df,
-        x="savingsValueCategory",
-        y="totalEstimatedMonthlySavings",
-        color="implementationEffort",
-        title="Total Savings by Savings Value Category and Implementation Effort",
-        barmode="stack",
-        text_auto=".2s",
-        category_orders={"savingsValueCategory": SAVINGS_CATEGORY_ORDER},
+        data.iloc[::-1],
+        x=value,
+        y=category,
+        orientation="h",
+        text=data.iloc[::-1][value].map(text_format),
+        labels={value: value_label, category: ""},
+        color_discrete_sequence=[BAR_COLOUR],
     )
-    fig.update_layout(
-        xaxis_title="Savings Value Category",
-        yaxis_title="Total Estimated Monthly Savings",
-        legend_title="Implementation Effort",
-        height=500,
-        margin=dict(l=20, r=20, t=60, b=20),
-    )
-    fig.update_yaxes(tickprefix="$", tickformat=",.0f")
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="#0b0c0c"))
+    fig.update_xaxes(tickfont=dict(color="#0b0c0c"), title_font=dict(color="#0b0c0c"))
+    fig.update_yaxes(tickfont=dict(color="#0b0c0c"))
+    show_chart(fig, description, margin=dict(l=10, r=40, t=10, b=10), height=max(220, 32 * len(data) + 80))
 
-    pivot_df = (
-        savings_effort_df.pivot_table(
-            index="savingsValueCategory",
-            columns="implementationEffort",
-            values="totalEstimatedMonthlySavings",
-            aggfunc="sum",
-            fill_value=0,
-        )
-        .reindex(
-            [
-                c
-                for c in SAVINGS_CATEGORY_ORDER
-                if c in savings_effort_df["savingsValueCategory"].astype(str).unique()
-            ],
-            fill_value=0,
-        )
-        .reset_index()
-        .round(2)
+
+def show_chart(fig, description, **layout):
+    fig.update_layout(font=dict(color="#0b0c0c"), paper_bgcolor="#ffffff", plot_bgcolor="#ffffff", **layout)
+    st.plotly_chart(
+        fig, width="stretch",
+        alt=f"{description} Accounts: {account_scope}. Namespaces: {namespace_scope}.",
     )
 
-    st.dataframe(
-        pivot_df,
-        use_container_width=True,
-        hide_index=True,
+
+def part_to_whole(values):
+    return bool((values >= 0).all() and values.sum() > 0)
+
+
+def coverage_dials(coverage, description):
+    for start in range(0, len(coverage), 4):
+        for column, row in zip(st.columns(4), coverage.iloc[start:start + 4].itertuples()):
+            with column:
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=row.pct_tagged,
+                    title=dict(text=row.tag, font=dict(size=16)),
+                    number=dict(suffix="%", valueformat=".1f", font=dict(size=28)),
+                    gauge=dict(
+                        axis=dict(range=[0, 100], ticksuffix="%"),
+                        bar=dict(color=BAR_COLOUR),
+                        bgcolor="#f3f2f1",
+                        borderwidth=0,
+                    ),
+                ))
+                show_chart(
+                    fig, f"Dial: {pct(row.pct_tagged)} of taggable usage cost carries the {row.tag} tag. {description}",
+                    height=200, margin=dict(l=45, r=45, t=50, b=10),
+                )
+
+
+def donut_chart(data, category, remainder_label, description):
+    slices = largest_with_remainder(data, category, len(CATEGORY_COLOURS), remainder_label)
+    fig = go.Figure(go.Pie(
+        labels=slices[category],
+        values=slices["spend_usd"],
+        text=slices["pct_of_total"].map(pct),
+        textinfo="text",
+        textposition="inside",
+        hole=0.55,
+        sort=False,
+        direction="clockwise",
+        marker=dict(colors=CATEGORY_COLOURS, line=dict(color="#ffffff", width=2)),
+        hovertemplate="%{label}<br>%{value:$,.2f}<br>%{text}<extra></extra>",
+    ))
+    fig.add_annotation(text=f"Total<br>{money(data['spend_usd'].sum())}", showarrow=False, font=dict(size=18))
+    show_chart(
+        fig, description, height=420, margin=dict(l=10, r=10, t=10, b=10),
+        uniformtext=dict(minsize=12, mode="hide"),
+        legend=dict(orientation="h", yanchor="top", y=-0.02, x=0),
     )
 
-    st.markdown("### Drill-down: action type and resource type breakdown")
 
-    drilldown_source_df = filtered_df.copy()
-    drilldown_source_df["implementationEffort"] = (
-        drilldown_source_df["implementationEffort"]
-        .fillna("Unknown")
-        .astype(str)
-        .str.strip()
+def treemap_chart(data, description):
+    positive = data[data["spend_usd"] > 0]
+    ranked = positive.groupby("business_unit")["spend_usd"].sum().sort_values(ascending=False).index
+    # Smaller business units share a neutral grey so no palette colour is reused.
+    colours = {unit: CATEGORY_COLOURS[rank] if rank < len(CATEGORY_COLOURS) else "#b1b4b6" for rank, unit in enumerate(ranked)}
+    fig = px.treemap(
+        positive, path=["business_unit", "account_name"], values="spend_usd",
+        color="business_unit", color_discrete_map=colours,
+    )
+    fig.update_traces(
+        texttemplate="%{label}<br>%{value:$,.0f}",
+        hovertemplate="%{label}<br>%{value:$,.2f}<extra></extra>",
+        root_color="#f3f2f1",
+        marker=dict(line=dict(color="#ffffff", width=1)),
+    )
+    show_chart(
+        fig, description, height=520, margin=dict(l=10, r=10, t=30, b=10),
+        uniformtext=dict(minsize=10, mode="hide"),
     )
 
-    available_savings_categories = [
-        c
-        for c in SAVINGS_CATEGORY_ORDER
-        if c in drilldown_source_df["savingsValueCategory"].astype(str).unique()
-    ]
 
-    available_efforts = sorted(
-        drilldown_source_df["implementationEffort"].dropna().astype(str).unique().tolist()
+def money(value):
+    return f"${value:,.0f}"
+
+
+def pct(value):
+    return f"{value:.1f}%"
+
+
+total_spend = view["spend_usd"].sum()
+account_count = view["account_name"].nunique()
+ytd = financial_year_spend(history, month)
+ytd_missing = ytd.loc[ytd["spend_usd"].isna(), "billing_period"].tolist()
+ytd_value = "Not available" if ytd_missing else f"${ytd['spend_usd'].sum():,.2f}"
+
+spend_column, accounts_column, ytd_column = st.columns(3)
+
+with spend_column:
+    st.metric("Total spend (USD)", f"${total_spend:,.2f}")
+
+with accounts_column:
+    st.metric("Accounts", f"{account_count:,}")
+
+with ytd_column:
+    st.metric("YTD spend (USD)", ytd_value)
+    if ytd_missing:
+        st.caption(f"Incomplete history: {len(ytd) - len(ytd_missing)} of {len(ytd)} financial-year months available.")
+
+
+tab_ytd, tab_trend, tab_forecast, tab_tags, tab_account, tab_type = st.tabs(
+    ["Year-to-date", "Spend trend", "Forecast", "Tagging coverage", "By account / namespace", "By service type"]
+)
+
+with tab_ytd:
+    st.subheader("Financial year-to-date spend")
+    st.caption(f"April-to-March financial year: {ytd.iloc[0]['billing_period']} to {month}. Current business unit, account and namespace filters apply.")
+    if ytd_missing:
+        st.info(
+            f"Full YTD spend is not available. Missing months for this selection: {', '.join(ytd_missing)}. "
+            "It will populate when data for these months is included in the uploaded CSV. Missing months are not treated as zero."
+        )
+        st.metric("Available-month subtotal (USD, partial)", f"${ytd['spend_usd'].sum():,.2f}")
+    else:
+        st.metric("Financial YTD spend (USD)", ytd_value)
+    report_table(
+        ytd,
+        f"Financial-year monthly spend through {month}, {business_unit}; unavailable months are blank.",
+        "year-to-date",
+    )
+    st.caption("Based on rows in the uploaded CSV; month availability does not confirm that an export contains all charges. Budget comparison is not available: no budget data has been supplied.")
+
+with tab_trend:
+    st.subheader("12-month spend trend")
+    trend = monthly_spend(history, month)
+    trend_missing = trend.loc[trend["spend_usd"].isna(), "billing_period"].tolist()
+    if trend_missing:
+        st.info(
+            f"Partial history: {12 - len(trend_missing)} of 12 months available. "
+            f"Missing months for this selection: {', '.join(trend_missing)}. "
+            "The trend will populate as more months are included in the uploaded CSV; gaps are not zero spend."
+        )
+    if trend["spend_usd"].notna().sum() < 2:
+        st.info("A spend trend is not yet available: at least two months of spend data are needed. The available month is shown below.")
+    else:
+        trend_chart = px.line(
+            trend, x="billing_period", y="spend_usd", markers=True,
+            labels={"billing_period": "Billing month", "spend_usd": "Spend (USD)"},
+            color_discrete_sequence=[BAR_COLOUR],
+        )
+        trend_chart.update_traces(connectgaps=False)
+        trend_chart.update_xaxes(type="category", categoryorder="array", categoryarray=trend["billing_period"].tolist())
+        st.plotly_chart(
+            trend_chart, width="stretch",
+            alt=f"Monthly Hosting spend over 12 months ending {month}, {business_unit}. Missing months are gaps. Accounts: {account_scope}. Namespaces: {namespace_scope}.",
+        )
+    report_table(
+        trend,
+        f"12-month spend history ending {month}, {business_unit}; unavailable months are blank.",
+        "spend-trend",
     )
 
-    drilldown_col1, drilldown_col2 = st.columns(2)
+with tab_forecast:
+    st.subheader("Forecasted spend")
+    st.metric("Next 3 months forecast (USD)", "Not available")
+    st.info(
+        "Forecast data is not available in the current CSV. This section will populate once a forecast data source "
+        "and an agreed forecasting method are connected. Additional actual-spend history alone does not provide a forecast."
+    )
 
-    with drilldown_col1:
-        selected_drilldown_savings_category = st.selectbox(
-            "Select savings value category",
-            options=available_savings_categories,
-            key="savings_effort_drilldown_category",
-        )
-
-    with drilldown_col2:
-        selected_drilldown_effort = st.selectbox(
-            "Select implementation effort",
-            options=available_efforts,
-            key="savings_effort_drilldown_effort",
-        )
-
-    drilldown_df = drilldown_source_df[
-        (drilldown_source_df["savingsValueCategory"].astype(str) == selected_drilldown_savings_category)
-        & (drilldown_source_df["implementationEffort"] == selected_drilldown_effort)
-    ].copy()
-
-    if not drilldown_df.empty:
-        breakdown_df = (
-            drilldown_df.groupby(
-                ["actionType", "currentResourceType"],
-                dropna=False,
-                as_index=False,
-            )["estimatedMonthlySavings"]
-            .sum()
-            .rename(columns={"estimatedMonthlySavings": "totalEstimatedMonthlySavings"})
-            .sort_values("totalEstimatedMonthlySavings", ascending=False)
-        )
-
-        breakdown_df["actionResource"] = (
-            breakdown_df["actionType"].fillna("Unknown").astype(str)
-            + " | "
-            + breakdown_df["currentResourceType"].fillna("Unknown").astype(str)
-        )
-
-        fig = px.bar(
-            breakdown_df,
-            x="actionResource",
-            y="totalEstimatedMonthlySavings",
-            title=(
-                "Breakdown of Total Savings by Action Type / Resource Type "
-                f"for {selected_drilldown_effort} effort in {selected_drilldown_savings_category}"
-            ),
-            text_auto=".2s",
-        )
-        fig.update_layout(
-            xaxis_title="Action Type | Current Resource Type",
-            yaxis_title="Total Estimated Monthly Savings",
-            height=500,
-            margin=dict(l=20, r=20, t=60, b=20),
-        )
-        fig.update_yaxes(tickprefix="$", tickformat=",.0f")
-        st.plotly_chart(fig, use_container_width=True)
-
-        st.dataframe(
-            breakdown_df[["actionType", "currentResourceType", "totalEstimatedMonthlySavings"]].round(2),
-            use_container_width=True,
-            hide_index=True,
+# -----------------------------
+# 5. Tagging coverage
+# -----------------------------
+with tab_tags:
+    st.info(
+        "Service Area via the AWS rule (cost category) is 100% by definition: every row here is in "
+        "the Hosting cost category. The dials show the share of cost that also carries each team tag."
+    )
+    coverage = tagging_coverage(view)
+    if coverage["pct_tagged"].notna().any():
+        coverage_dials(
+            coverage,
+            f"Tagging coverage for {month}, filtered to {business_unit}. "
+            "The table below contains the percentages and cost amounts.",
         )
     else:
-        st.info("No drill-down data available for the selected savings category and implementation effort.")
-else:
-    st.info("No data available for the selected filters.")
-
-# NEW PANELS: Priority Score Analysis
-
-st.divider()
-st.header("Priority Score Analysis")
-
-st.markdown("""
-This section uses the following formula to calculate Priority Scores:
-
-**Priority Score = (TotalEstimatedMonthlySavings^1.2) / ((effortFactor × recommendationCountFactor)^2)**
-
-Where:
-- **Effort Factor**: Average of effort factors for recommendations in the group (Low=1, Medium=2, High=6, Very High=10)
-- **Recommendation Count Factor**: Based on total recommendations in the group (1-100 recs=1.0, 100-500=1.5, 500-1500=2.0, 1500+=3.0)
-
-Higher priority scores indicate better opportunities (high savings, lower effort, fewer recommendations to process).
-""")
-
-# Panel 1: Priority Score Summary Table
-st.subheader("Priority Score by Action Type / Resource Type / Savings Category")
-
-if not priority_agg.empty:
-    # Create display dataframe
-    display_df = priority_agg[[
-        "currentResourceType",
-        "actionType",
-        "savingsValueCategory",
-        "recommendationCount",
-        "totalEstimatedMonthlySavings",
-        "effortFactor",
-        "recommendationCountFactor",
-        "priorityScore",
-    ]].copy()
-    
-    # Rename columns for display
-    display_df.columns = [
-        "Resource Type",
-        "Action Type",
-        "Savings Category",
-        "# Recommendations",
-        "Total Monthly Savings",
-        "Avg Effort Factor",
-        "Count Factor",
-        "Priority Score",
-    ]
-    
-    # Format numeric columns
-    display_df["Total Monthly Savings"] = display_df["Total Monthly Savings"].apply(
-        lambda x: format_currency(x, currency)
+        st.info("Tagging coverage is unavailable: the selected rows have no non-zero taggable usage cost. It will populate when taggable usage-cost data is available in the uploaded CSV.")
+    report_table(
+        coverage,
+        f"Tagging coverage for {month}, {business_unit}: tagged and taggable usage cost in USD, and coverage percentage.",
+        "tagging-coverage",
     )
-    display_df["Priority Score"] = display_df["Priority Score"].round(2)
-    display_df["Avg Effort Factor"] = display_df["Avg Effort Factor"].round(2)
-    display_df["Count Factor"] = display_df["Count Factor"].round(2)
-    
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-    )
-else:
-    st.info("No data available for priority score analysis.")
-
-st.divider()
-
-# Panel 2: Drill-down table for individual recommendations
-st.subheader("Individual Recommendations Drill-Down")
-
-st.markdown("Filter individual recommendations by Action Type, Resource Type, and Savings Category.")
-
-drill_df = filtered_df.copy()
-
-# Create filter columns
-filter_col1, filter_col2, filter_col3 = st.columns(3)
-
-with filter_col1:
-    available_actions = sorted([x for x in drill_df["actionType"].dropna().unique().tolist()])
-    selected_action = st.selectbox(
-        "Filter by Action Type",
-        options=["All"] + available_actions,
-        key="drill_action_type",
+    st.caption("Usage lines, unblended cost. Products that never carry tags are left out, as in the model.")
+    st.info(
+        "Resource-count tagging compliance is not available: resource counts and tag-validation results have not been supplied. "
+        "The current measure is cost-weighted tag coverage, not the percentage of resources correctly tagged. "
+        "Resource compliance can populate once those inputs are connected."
     )
 
-with filter_col2:
-    available_resources = sorted([x for x in drill_df["currentResourceType"].dropna().unique().tolist()])
-    selected_resource = st.selectbox(
-        "Filter by Resource Type",
-        options=["All"] + available_resources,
-        key="drill_resource_type",
-    )
-
-with filter_col3:
-    available_categories = sorted([x for x in drill_df["savingsValueCategory"].dropna().unique().tolist()])
-    selected_category = st.selectbox(
-        "Filter by Savings Category",
-        options=["All"] + available_categories,
-        key="drill_savings_category",
-    )
-
-# Apply filters
-drill_display_df = drill_df.copy()
-
-if selected_action != "All":
-    drill_display_df = drill_display_df[drill_display_df["actionType"] == selected_action]
-
-if selected_resource != "All":
-    drill_display_df = drill_display_df[drill_display_df["currentResourceType"] == selected_resource]
-
-if selected_category != "All":
-    drill_display_df = drill_display_df[drill_display_df["savingsValueCategory"] == selected_category]
-
-# Sort by estimated monthly savings
-drill_display_df = drill_display_df.sort_values("estimatedMonthlySavings", ascending=False)
-
-if not drill_display_df.empty:
-    preferred_columns = [
-        "estimatedMonthlySavings",
-        "estimatedAnnualSavings",
-        "savingsValueCategory",
-        "accountId",
-        "accountName",
-        "region",
-        "currentResourceType",
-        "recommendedResourceType",
-        "actionType",
-        "implementationEffort",
-        "effortFactor",
-        "estimatedMonthlyCost",
-        "estimatedSavingsPercentage",
-        "resourceId",
-        "currentResourceSummary",
-        "recommendedResourceSummary",
-        "restartNeeded",
-        "rollbackPossible",
-        "source",
-        "lastRefreshTimestamp",
-        "recommendationId",
-        "resourceArn",
-    ]
-    
-    display_columns = [c for c in preferred_columns if c in drill_display_df.columns]
-    
-    st.dataframe(
-        drill_display_df[display_columns],
-        use_container_width=True,
-        hide_index=True,
-    )
-    
-    st.markdown(f"**Showing {len(drill_display_df)} recommendations**")
-else:
-    st.info("No recommendations match the selected filters.")
-
-st.divider()
-
-# Detailed recommendations table (original)
-st.subheader("Detailed recommendations")
-
-preferred_columns = [
-    "estimatedMonthlySavings",
-    "estimatedAnnualSavings",
-    "savingsValueCategory",
-    "accountId",
-    "accountName",
-    "region",
-    "currentResourceType",
-    "recommendedResourceType",
-    "resourceId",
-    "actionType",
-    "currentResourceSummary",
-    "recommendedResourceSummary",
-    "estimatedMonthlyCost",
-    "estimatedSavingsPercentage",
-    "implementationEffort",
-    "effortFactor",
-    "restartNeeded",
-    "rollbackPossible",
-    "source",
-    "lastRefreshTimestamp",
-    "recommendationId",
-    "resourceArn",
-    "tag_owner",
-    "tag_environment_name",
-    "tag_is_production",
-    "tag_application",
-    "tag_business_unit",
-    "tag_source_code",
-]
-
-display_columns = [c for c in preferred_columns if c in filtered_df.columns]
-st.dataframe(
-    filtered_df[display_columns].sort_values(
-        by="estimatedMonthlySavings", ascending=False
-    ),
-    use_container_width=True,
-    hide_index=True,
+# -----------------------------
+# 6. By account / namespace
+# -----------------------------
+with tab_account:
+    by_account = spend_by_account(view)
+    top_accounts = (
+    by_account.groupby("account_name", as_index=False)["spend_usd"]
+    .sum()
+    .sort_values("spend_usd", ascending=False)
+    .head(15)
 )
+    st.subheader("Spend by account")
+    if part_to_whole(by_account["spend_usd"]):
+        largest = top_accounts.iloc[0]
+        treemap_chart(
+            by_account,
+            f"Treemap of Hosting spend for {month}, filtered to {business_unit}: tiles are grouped by business unit "
+            f"and sized by account spend. Largest account: {largest.account_name} at {money(largest.spend_usd)}. "
+            "The tables below contain the values.",
+        )
+    else:
+        st.info(PART_TO_WHOLE_FALLBACK)
+        bar_chart(
+            top_accounts, "account_name", "spend_usd", "Spend (USD)", money,
+            f"Up to 15 highest-spending accounts for {month}, filtered to {business_unit}. "
+            "Spend is combined across the selected business units, in US dollars. "
+            "The table below contains the same account totals.",
+        )
+    st.subheader("Accounts: 15 largest by spend")
+    report_table(
+        top_accounts,
+        f"Top 15 account totals in USD for {month}, {business_unit}, ordered highest first.",
+        "top-accounts",
+    )
+    st.subheader("All accounts")
+    report_table(
+        by_account,
+        f"All accounts by business unit for {month}, {business_unit}: USD and share of total spend.",
+        "accounts",
+    )
+    st.subheader("Namespaces (user_namespace tag)")
+    report_table(
+        spend_by_namespace(view),
+        f"Namespace spending for {month}, {business_unit}: USD and share of total spend.",
+        "namespaces",
+    )
 
-# Download enriched data
-st.subheader("Download enriched dataset")
-csv_bytes = filtered_df.to_csv(index=False).encode("utf-8")
-st.download_button(
-    label="Download filtered/enriched CSV",
-    data=csv_bytes,
-    file_name="aws_cost_optimization_hub_enriched.csv",
-    mime="text/csv",
-)
+# -----------------------------
+# 7. By service type
+# -----------------------------
+with tab_type:
+    by_type = spend_by_service_type(view)
+    if part_to_whole(by_type["spend_usd"]):
+        largest = by_type.iloc[0]
+        donut_chart(
+            by_type, "service_type", "Remaining service types",
+            f"Donut chart of Hosting spend by service category for {month}, filtered to {business_unit}. "
+            f"Largest: {largest.service_type} at {pct(largest.pct_of_total)}. Smaller categories may be grouped; "
+            "the table below lists every category.",
+        )
+    else:
+        st.info(PART_TO_WHOLE_FALLBACK)
+        bar_chart(
+            by_type, "service_type", "spend_usd", "Spend (USD)", money,
+            f"Hosting spend by service category for {month}, filtered to {business_unit}. "
+            "Amounts are in US dollars. The table below contains the values.",
+        )
+    report_table(
+        by_type,
+        f"Service category spending for {month}, {business_unit}: USD and share of total spend.",
+        "service-types",
+    )
+    st.subheader("Per namespace")
+    if view["tag_namespace"].str.strip().str.lower().isin(["", "untagged"]).any():
+        st.info("Some rows have no namespace attribution. Their costs remain in the untagged group and will be attributed when namespace tags are supplied in the CSV.")
+    report_table(
+        spend_by_namespace_service_type(view),
+        f"Service breakdown for all namespaces in the current selection, {month}, {business_unit}: USD and share of each namespace's spend across the selected accounts.",
+        "namespace-services",
+    )
+    st.caption("Mapping from AWS product name, as in showback_scope.html section 7. EC2 includes its storage volumes, NAT gateways and data transfer.")
+
+render_footer()

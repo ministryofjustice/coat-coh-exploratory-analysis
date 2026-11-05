@@ -7,7 +7,8 @@ import streamlit as st
 
 from authlib.integrations.requests_client import OAuth2Session
 
-from config import AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, AUTH0_DOMAIN, APP_ENV, AUTH_DISABLED, APP_BASE_URL
+from render_html import render_footer
+from config import AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET, AUTH0_DOMAIN, APP_ENV, AUTH_DISABLED, APP_BASE_URL, DASHBOARD_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -194,13 +195,16 @@ def require_auth0_login() -> None:
     process_auth0_callback()
 
     if "auth0_user" not in st.session_state:
-        st.title("AWS Cost Optimization Hub Dashboard")
+        st.title(DASHBOARD_NAME)
         st.info("Please log in to continue.")
         st.link_button(
             "Log in with Auth0",
             create_auth0_login_url(),
             type="primary",
         )
+
+        render_footer()
+
         st.stop()
 
     userinfo = st.session_state["auth0_user"]
