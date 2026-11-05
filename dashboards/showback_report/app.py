@@ -1,10 +1,12 @@
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from datetime import datetime, timezone
+from redis.exceptions import RedisError
 
-from services.athena_service import AthenaService
+from services.redis_service import RedisService, CacheUnavailable
 from auth import require_auth0_login
-from config import APP_ENV, DASHBOARD_NAME
+from config import APP_ENV, DASHBOARD_NAME, ATHENA_DATABASE, ATHENA_QUERY
 from hosting_report import (
     ALL_BUSINESS_UNITS,
     filter_view,
@@ -42,32 +44,33 @@ st.caption(
 # Data load
 # -----------------------------
 
-athena_service = AthenaService()
+redis_service = RedisService()
 
 
 with st.spinner("Loading your data..."):
-    df = athena_service.run_query_to_df("cloud_optimisation_derived_dev_dbt.fct_monthly_showback_cost", '''select
-    billing_period,
-    cost_category_service_area,
-    business_unit,
-    account_name,
-    tag_namespace,
-    tag_service_area,
-    product_name,
-    is_taggable_product,
-    spend_usd,
-    usage_cost_usd,
-    tagged_service_area_usage_cost_usd,
-    tagged_business_unit_usage_cost_usd,
-    tagged_application_usage_cost_usd,
-    tagged_owner_usage_cost_usd,
-    tagged_is_production_usage_cost_usd,
-    tagged_environment_name_usage_cost_usd,
-    tagged_namespace_usage_cost_usd
-from cloud_optimisation_derived_dev_dbt.fct_monthly_showback_cost
-where cost_category_service_area = 'Hosting'
-and billing_period <= date_format(date_add('month', -1, current_date), '%Y-%m')
-order by billing_period, business_unit, account_name;''')
+    try:
+        df = redis_service.run_query_to_df(ATHENA_DATABASE, ATHENA_QUERY)
+    except CacheUnavailable as error:
+        print("Cached dataset unavailable")
+        st.error(str(error))
+        st.stop()
+    except RedisError:
+        print("Redis access failed")
+        st.error(
+            "The data cache is unavailable. "
+            "Please contact the dashboard support team."
+        )
+        st.stop()
+
+refreshed_at = datetime.fromtimestamp(
+    redis_service.last_refreshed_at,
+    timezone.utc,
+)
+
+st.caption(
+    f"Data snapshot: {refreshed_at:%Y-%m-%d %H:%M UTC}. "
+    "Refreshed monthly."
+)
 
 if df.empty:
     st.warning("The dataframs is empty.")
