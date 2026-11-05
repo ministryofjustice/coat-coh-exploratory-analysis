@@ -95,14 +95,14 @@ def test_account_namespace_filters_and_recovery(app_factory):
 
 def test_tables_render_without_download_buttons(app_factory):
     app = app_factory()
-    assert len(app.dataframe) == 8
+    assert len(app.dataframe) == 7
     assert len(app.get("download_button")) == 0
     assert app.session_state["tested_downloads"] == []
     app.selectbox(key="business_unit").select("HMPPS").run()
     account = app.multiselect(key="account_filter").options[0]
     app.multiselect(key="account_filter").set_value([account]).run()
     assert not app.exception, app.exception
-    assert len(app.dataframe) == 8
+    assert len(app.dataframe) == 7
     assert len(app.get("download_button")) == 0
     assert app.session_state["tested_downloads"] == []
     for table in app.dataframe:
@@ -129,7 +129,7 @@ def test_zero_cost_and_unavailable_tagging(app_factory):
     coverage = next(table.value for table in app.dataframe if "pct_tagged" in table.value)
     assert coverage.pct_tagged.isna().all()
     assert [trace["type"] for trace in chart_traces(app)] == ["scatter", "bar", "bar"]
-    assert sum("can't be shown as parts of a whole" in item.value for item in app.info) == 2
+    assert sum("can't be shown as parts of a whole" in item.value for item in app.info) == 1
     assert any("Tagging coverage is unavailable" in item.value for item in app.info)
     assert any("shown as blank" in item.value for item in app.info)
 
@@ -253,25 +253,23 @@ def test_single_month_trend_and_april_ytd(app_factory):
     app = app_factory("source = source[source.billing_period == '2026-09'].assign(billing_period='2026-04')")
     assert any("A spend trend is not yet available" in item.value for item in app.info)
     assert next(metric.value for metric in app.metric if metric.label == "YTD spend (USD)") == "$1,550.00"
-    assert [trace["type"] for trace in chart_traces(app)] == ["indicator"] * 7 + ["treemap", "pie"]
+    assert [trace["type"] for trace in chart_traces(app)] == ["indicator"] * 7 + ["bar", "pie"]
 
 
 def test_chart_types_are_diversified(app_factory):
     app = app_factory()
     traces = chart_traces(app)
-    assert [trace["type"] for trace in traces] == ["scatter"] + ["indicator"] * 7 + ["treemap", "pie"]
+    assert [trace["type"] for trace in traces] == ["scatter"] + ["indicator"] * 7 + ["bar", "pie"]
     source = read_hosting_csv(SAMPLE)
     coverage = tagging_coverage(source[source.billing_period == "2026-09"])
     dials = traces[1:8]
     assert [dial["title"]["text"] for dial in dials] == coverage.tag.tolist()
     assert [dial["value"] for dial in dials] == pytest.approx(coverage.pct_tagged.tolist())
     assert all(dial["gauge"]["axis"]["range"] == [0, 100] for dial in dials)
-    treemap, donut = traces[8], traces[9]
-    top_level = [value for value, parent in zip(decoded(treemap["values"]), treemap["parents"]) if parent == ""]
-    assert sum(top_level) == pytest.approx(1550)
-    assert {"OCTO", "HMPPS", "example-platform-prod", "example-probation-dev"} <= set(treemap["labels"])
-    colours = dict(zip(treemap["labels"], treemap["marker"]["colors"]))
-    assert [colours[unit] for unit in ("OCTO", "HMPPS", "untagged")] == ["#12436D", "#28A197", "#801650"]
+    accounts, donut = traces[8:]
+    assert accounts["y"][::-1] == ["example-platform-prod", "example-probation-dev", "example-unassigned"]
+    assert sum(decoded(accounts["x"])) == pytest.approx(1550)
+    assert "example-platform-prod $1,200; example-probation-dev $340" in app.get("plotly_chart")[8].proto.alt
     service_table = next(table.value for table in app.dataframe if {"service_type", "pct_of_total"} <= set(table.value))
     assert donut["labels"] == service_table.service_type.tolist()
     assert donut["text"] == [f"{value:.1f}%" for value in service_table.pct_of_total]
@@ -299,8 +297,10 @@ def test_donut_groups_small_service_types(app_factory):
 
 def test_part_to_whole_charts_fall_back_for_credits(app_factory):
     app = app_factory("source.loc[source.business_unit == 'HMPPS', 'spend_usd'] = -100")
-    assert [trace["type"] for trace in chart_traces(app)] == ["scatter"] + ["indicator"] * 7 + ["bar", "bar"]
-    assert sum("can't be shown as parts of a whole" in item.value for item in app.info) == 2
+    traces = chart_traces(app)
+    assert [trace["type"] for trace in traces] == ["scatter"] + ["indicator"] * 7 + ["bar", "bar"]
+    assert sum("can't be shown as parts of a whole" in item.value for item in app.info) == 1
+    assert dict(zip(traces[8]["y"], decoded(traces[8]["x"])))["example-probation-dev"] == -100
 
 
 def test_service_breakdown_shows_all_namespaces_without_local_filters(app_factory):
