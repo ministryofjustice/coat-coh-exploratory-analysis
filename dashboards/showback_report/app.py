@@ -45,7 +45,28 @@ athena_service = AthenaService()
 
 
 with st.spinner("Loading your data..."):
-    df = athena_service.run_query_to_df("cloud_optimisation_datamarts", "SELECT * FROM fct_net_unblended_cost_categorised;")
+    df = athena_service.run_query_to_df("cloud_optimisation_derived_dev_dbt.fct_monthly_showback_cost", '''select
+    billing_period,
+    cost_category_service_area,
+    business_unit,
+    account_name,
+    tag_namespace,
+    tag_service_area,
+    product_name,
+    is_taggable_product,
+    spend_usd,
+    usage_cost_usd,
+    tagged_service_area_usage_cost_usd,
+    tagged_business_unit_usage_cost_usd,
+    tagged_application_usage_cost_usd,
+    tagged_owner_usage_cost_usd,
+    tagged_is_production_usage_cost_usd,
+    tagged_environment_name_usage_cost_usd,
+    tagged_namespace_usage_cost_usd
+from cloud_optimisation_derived_dev_dbt.fct_monthly_showback_cost
+where cost_category_service_area = 'Hosting'
+and billing_period <= date_format(date_add('month', -1, current_date), '%Y-%m')
+order by billing_period, business_unit, account_name;''')
 
 if df.empty:
     st.warning("The dataframs is empty.")
