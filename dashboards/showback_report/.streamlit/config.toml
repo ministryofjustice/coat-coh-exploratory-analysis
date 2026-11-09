@@ -1,0 +1,3 @@
+# Overrides the repo-root config for this app only: its GOV.UK styling is light-only.
+[theme]
+base = "light"
