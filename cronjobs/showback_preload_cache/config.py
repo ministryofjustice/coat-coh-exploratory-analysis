@@ -11,15 +11,9 @@ ATHENA_OUTPUT_LOCATION = os.getenv("ATHENA_OUTPUT_LOCATION")
 
 ATHENA_WORKGROUP = os.getenv("ATHENA_WORKGROUP")
 
-ATHENA_DATABASE = os.getenv(
-    "ATHENA_CACHE_DATABASE",
-    "cloud_optimisation_datamarts",
-)
+ATHENA_DATABASE = os.getenv("ATHENA_CACHE_DATABASE")
 
-ATHENA_QUERY = os.getenv(
-    "ATHENA_CACHE_QUERY",
-    "SELECT * FROM fct_net_unblended_cost_categorised;",
-)
+ATHENA_QUERY = os.getenv("ATHENA_CACHE_QUERY")
 
 # Redis config
 
