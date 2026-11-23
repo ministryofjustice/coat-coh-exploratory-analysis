@@ -93,5 +93,5 @@ jobs:
             --set app.deployment.dashboards.showback_report.env.REDIS_PORT="${REDIS_PORT}" \
             --set app.deployment.env.ENTRA_TENANT_ID="${ENTRA_TENANT_ID}" \
             --set app.deployment.env.ENTRA_CLIENT_ID="${ENTRA_CLIENT_ID}" \
-            --set app.deployment.env.ENTRA_CLIENT_SECRET="${ENTRA_CLIENT_SECRET}"
+            --set app.deployment.env.ENTRA_CLIENT_SECRET="${ENTRA_CLIENT_SECRET}" \
             --set app.deployment.env.ENTRA_COOKIE_SECRET="${ENTRA_COOKIE_SECRET}"
