@@ -15,9 +15,10 @@ env:
   ECR_REGISTRY: ${{ secrets.ECR_REGISTRY_URL }}
   ECR_REPOSITORY: ${{ vars.DEV_MVP_DASHBOARDS_ECR_REPOSITORY }}
 
-  AUTH0_CLIENT_ID: ${{ secrets.DEV_AUTH0_APP_CLIENT_ID }}
-  AUTH0_CLIENT_SECRET: ${{ secrets.DEV_AUTH0_APP_CLIENT_SECRET }}
-  AUTH0_DOMAIN: ${{ secrets.DEV_AUTH0_DOMAIN }}
+  ENTRA_CLIENT_ID: ${{ secrets.ENTRA_CLIENT_ID }}
+  ENTRA_CLIENT_SECRET: ${{ secrets.DEV_AUTH0_APP_CLIENT_SECRET }}
+  ENTRA_TENANT_ID: ${{ secrets.ENTRA_TENANT_ID }}
+  ENTRA_COOKIE_SECRET: ${{ secrets.ENTRA_COOKIE_SECRET }}
 
   ATHENA_REGION: ${{ secrets.ATHENA_REGION }}
   ATHENA_ROLE: ${{ secrets.ATHENA_ROLE }}
@@ -90,7 +91,7 @@ jobs:
             --set app.deployment.dashboards.showback_report.env.REDIS_HOST="${REDIS_HOST}" \
             --set app.deployment.dashboards.showback_report.env.REDIS_PASSWORD="${REDIS_PASSWORD}" \
             --set app.deployment.dashboards.showback_report.env.REDIS_PORT="${REDIS_PORT}" \
-            --set app.deployment.env.AUTH0_DOMAIN="${AUTH0_DOMAIN}" \
-            --set app.deployment.env.AUTH0_CLIENT_ID="${AUTH0_CLIENT_ID}" \
-            --set app.deployment.env.AUTH0_CLIENT_SECRET="${AUTH0_CLIENT_SECRET}"
-
+            --set app.deployment.env.ENTRA_TENANT_ID="${ENTRA_TENANT_ID}" \
+            --set app.deployment.env.ENTRA_CLIENT_ID="${ENTRA_CLIENT_ID}" \
+            --set app.deployment.env.ENTRA_CLIENT_SECRET="${ENTRA_CLIENT_SECRET}"
+            --set app.deployment.env.ENTRA_COOKIE_SECRET="${ENTRA_COOKIE_SECRET}"

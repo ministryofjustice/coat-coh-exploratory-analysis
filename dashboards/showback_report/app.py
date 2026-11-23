@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from redis.exceptions import RedisError
 
 from services.redis_service import RedisReadService, CacheUnavailable
-from auth import require_auth0_login
+from auth import require_entra_login
 from config import APP_ENV, DASHBOARD_NAME, ATHENA_DATABASE, ATHENA_QUERY
 from hosting_report import (
     ALL_BUSINESS_UNITS,
@@ -33,8 +33,7 @@ st.set_page_config(
 
 render_header()
 
-if APP_ENV:
-    require_auth0_login()
+require_entra_login()
 
 st.title(DASHBOARD_NAME)
 st.caption(

@@ -11,6 +11,12 @@ app:
       APP_ENV: "development"
       COH_REPORT_S3_URI: "s3://cloud-platform-4e74939a04d400578bfbe3f3f707b07e/coh-reports-manual/COH-recommendations-2026-09-23-sort-by-value-excl-RIs-SPs.csv"
 
+      AUTH_DISABLED: false
+      ENTRA_TENANT_ID: ""
+      ENTRA_CLIENT_ID: ""
+      ENTRA_CLIENT_SECRET: ""
+      ENTRA_COOKIE_SECRET: ""
+
     dashboards:
       coh_dashboard:
         name: "coh-dashboard"
@@ -69,3 +75,4 @@ app:
           REDIS_HOST: ""
           REDIS_PASSWORD: ""
           REDIS_PORT: ""
+
