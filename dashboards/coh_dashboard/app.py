@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +6,8 @@ import streamlit as st
 import numpy as np
 
 from auth import require_auth0_login
-from s3_data import download_csv_from_s3
+from recommendations import load_data
+from s3_data import load_coh_dataframe
 from render_html import render_footer, render_header
 from config import APP_ENV
 from local_data_input import manual_file_upload
@@ -25,7 +25,7 @@ if APP_ENV:
     require_auth0_login()
 
 st.title("AWS Cost Optimization Hub Recommendations Dashboard")
-st.caption("Local CORA-style dashboard for AWS Cost Optimization Hub CSV exports")
+st.caption("AWS Cost Optimization Hub recommendations")
 
 # Constants
 
@@ -46,23 +46,6 @@ SAVINGS_CATEGORY_COLORS = {
     "<$1/month": "#C0392B",
     "Unknown": "#95A5A6",
 }
-
-# Effort factor mappings
-EFFORT_FACTOR_MAP = {
-    "Low": 1,
-    "Medium": 2,
-    "High": 6,
-    "VeryHigh": 10,
-}
-
-
-def get_effort_factor(effort):
-    """Get effort factor from implementation effort string"""
-    if pd.isna(effort):
-        return 1
-    effort_str = str(effort).strip()
-    return EFFORT_FACTOR_MAP.get(effort_str, 1)
-
 
 def get_recommendation_count_factor(count):
     """Map recommendation count to factor"""
@@ -96,107 +79,14 @@ def calculate_priority_score(row):
 # -----------------------------
 # Helpers
 # -----------------------------
-def classify_savings(value) -> str:
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return "Unknown"
-
-    if v >= 1000:
-        return ">=$1000/month"
-    elif v >= 500:
-        return ">=$500/month and <$1000/month"
-    elif v >= 100:
-        return ">=$100/month and <$500/month"
-    elif v >= 1:
-        return ">=$1/month and <$100/month"
-    else:
-        return "<$1/month"
-
-
 def format_currency(value: float, currency: str = "USD") -> str:
     symbol = "$" if currency == "USD" else f"{currency} "
     return f"{symbol}{value:,.2f}"
 
 
-def coerce_bool_series(series: pd.Series) -> pd.Series:
-    if series.dtype == bool:
-        return series
-    mapping = {
-        "true": True,
-        "false": False,
-        "True": True,
-        "False": False,
-        True: True,
-        False: False,
-        1: True,
-        0: False,
-    }
-    return series.map(lambda x: mapping.get(x, x)).fillna(False).astype(bool)
-
-
-def parse_tags(value):
-    if pd.isna(value):
-        return {}
-    if isinstance(value, list):
-        return {
-            item.get("key"): item.get("value")
-            for item in value
-            if isinstance(item, dict) and "key" in item
-        }
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return {
-                    item.get("key"): item.get("value")
-                    for item in parsed
-                    if isinstance(item, dict) and "key" in item
-                }
-        except Exception:
-            return {}
-    return {}
-
-
 @st.cache_data
-def load_data(uploaded_file):
-    df = pd.read_csv(uploaded_file)
-
-    numeric_columns = [
-        "estimatedMonthlySavings",
-        "estimatedMonthlyCost",
-        "estimatedSavingsPercentage",
-        "recommendationLookbackPeriodInDays",
-    ]
-    for col in numeric_columns:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    if "lastRefreshTimestamp" in df.columns:
-        df["lastRefreshTimestamp"] = pd.to_datetime(
-            df["lastRefreshTimestamp"], errors="coerce", utc=True
-        )
-
-    for col in ["restartNeeded", "rollbackPossible"]:
-        if col in df.columns:
-            df[col] = coerce_bool_series(df[col])
-
-    df["savingsValueCategory"] = df["estimatedMonthlySavings"].apply(classify_savings)
-    df["estimatedAnnualSavings"] = df["estimatedMonthlySavings"].fillna(0) * 12
-    
-    # Add effort factor column
-    df["effortFactor"] = df["implementationEffort"].apply(get_effort_factor)
-
-    if "tags" in df.columns:
-        df["parsedTags"] = df["tags"].apply(parse_tags)
-        df["tag_owner"] = df["parsedTags"].apply(lambda d: d.get("owner"))
-        df["tag_environment_name"] = df["parsedTags"].apply(lambda d: d.get("environment-name"))
-        df["tag_is_production"] = df["parsedTags"].apply(lambda d: d.get("is-production"))
-        df["tag_application"] = df["parsedTags"].apply(lambda d: d.get("application"))
-        df["tag_business_unit"] = df["parsedTags"].apply(lambda d: d.get("business-unit"))
-        df["tag_source_code"] = df["parsedTags"].apply(lambda d: d.get("source-code"))
-
-    return df
+def load_report(source):
+    return load_data(source)
 
 
 def make_bar_chart(data, x, y, title, color=None, orientation="v"):
@@ -229,18 +119,18 @@ def make_treemap(data, path, values, title):
 
 if APP_ENV:
     try:
-        csv_file = download_csv_from_s3()
+        report = load_coh_dataframe()
     except Exception as exc:
         st.error("Unable to load the Cost Optimization Hub report from S3.")
         st.exception(exc)
         st.stop()
 else:
-    csv_file = manual_file_upload()
+    report = manual_file_upload()
 
-df = load_data(csv_file)
+df = load_report(report)
 
 if df.empty:
-    st.warning("The uploaded CSV contains no rows.")
+    st.warning("The report contains no rows.")
     st.stop()
 
 currency = (
@@ -306,11 +196,14 @@ st.divider()
 # -----------------------------
 # Summary tables for charts
 # -----------------------------
-savings_by_account = (
-    filtered_df.groupby("accountName", dropna=False, as_index=False)["estimatedMonthlySavings"]
-    .sum()
-    .sort_values("estimatedMonthlySavings", ascending=False)
-)
+if "accountName" in filtered_df.columns:
+    savings_by_account = (
+        filtered_df.groupby("accountName", dropna=False, as_index=False)["estimatedMonthlySavings"]
+        .sum()
+        .sort_values("estimatedMonthlySavings", ascending=False)
+    )
+else:
+    savings_by_account = pd.DataFrame(columns=["accountName", "estimatedMonthlySavings"])
 
 savings_by_region = (
     filtered_df.groupby("region", dropna=False, as_index=False)["estimatedMonthlySavings"]
