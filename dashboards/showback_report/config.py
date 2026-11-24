@@ -7,6 +7,15 @@ APP_BASE_URL = os.getenv("APP_BASE_URL")
 
 DASHBOARD_NAME = "MOJ AWS Showback Report"
 
+# Auth config
+
+AUTH_DISABLED = (os.getenv("AUTH_DISABLED") or "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 # Athena config
 
 ATHENA_REGION = os.getenv("ATHENA_REGION")

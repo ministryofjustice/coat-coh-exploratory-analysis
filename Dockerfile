@@ -37,7 +37,7 @@ COPY --chown=appuser:appgroup requirements.txt ./
 RUN python3 -m venv .venv && source .venv/bin/activate && \
     pip install -r requirements.txt
 
-ENV PATH="/$DASHBOARD/.venv/bin:$PATH"
+ENV PATH="/home/$DASHBOARD/.venv/bin:$PATH"
 
 # Copy the launcher into /home/$DASHBOARD
 COPY --chown=appuser:appgroup /dashboards/common/launcher.py ./
