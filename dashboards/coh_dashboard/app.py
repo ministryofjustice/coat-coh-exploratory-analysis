@@ -5,26 +5,24 @@ import plotly.express as px
 import streamlit as st
 import numpy as np
 
-from auth import require_auth0_login
+from auth import require_entra_login
 from recommendations import load_data
 from s3_data import load_coh_dataframe
 from render_html import render_footer, render_header
-from config import APP_ENV
+from config import APP_ENV, DASHBOARD_NAME
 from local_data_input import manual_file_upload
 
 st.set_page_config(
-    page_title="AWS Cost Optimization Hub Dashboard",
+    page_title=DASHBOARD_NAME,
     page_icon="💰",
     layout="wide",
 )
 
 render_header()
-render_footer()
 
-if APP_ENV:
-    require_auth0_login()
+require_entra_login()
 
-st.title("AWS Cost Optimization Hub Recommendations Dashboard")
+st.title(DASHBOARD_NAME)
 st.caption("AWS Cost Optimization Hub recommendations")
 
 # Constants
@@ -995,4 +993,6 @@ st.download_button(
     file_name="aws_cost_optimization_hub_enriched.csv",
     mime="text/csv",
 )
+
+render_footer()
 
