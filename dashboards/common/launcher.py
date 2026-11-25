@@ -51,6 +51,13 @@ def build_auth_config() -> dict[str, dict[str, str]]:
 
 
 def main() -> int:
+    if os.environ.get("APP_ENV") == "local":
+        return subprocess.run(
+            [sys.executable, "-m", "streamlit", "run", str(APP), *sys.argv[1:]],
+            cwd=ROOT,
+            check=False,
+        ).returncode
+
     sections = build_auth_config()
 
     # Streamlit reads authentication settings from a secrets file.

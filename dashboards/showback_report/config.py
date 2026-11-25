@@ -1,7 +1,7 @@
 import os
 
 
-APP_ENV = os.getenv("APP_ENV")
+APP_ENV = os.getenv("APP_ENV", "dev")
 
 APP_BASE_URL = os.getenv("APP_BASE_URL")
 
@@ -32,11 +32,11 @@ ATHENA_QUERY = os.getenv("ATHENA_CACHE_QUERY")
 
 # Redis config
 
-REDIS_HOST = os.environ["REDIS_HOST"]
+REDIS_HOST = os.getenv("REDIS_HOST", "")
 
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
-REDIS_PASSWORD = os.environ["REDIS_PASSWORD"]
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 
 CACHE_TTL_SECONDS = int(
     os.getenv("ATHENA_CACHE_TTL_SECONDS", "3024000")
@@ -44,7 +44,7 @@ CACHE_TTL_SECONDS = int(
 
 # Redis config validation
 
-if not REDIS_HOST or not REDIS_PASSWORD:
+if APP_ENV != "local" and (REDIS_HOST or not REDIS_PASSWORD):
     raise ValueError("Redis host and password must not be empty")
 
 if CACHE_TTL_SECONDS <= 0:
