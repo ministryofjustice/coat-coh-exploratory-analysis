@@ -1,6 +1,8 @@
 run-local:
 	python3 -m venv .venv && source .venv/bin/activate
 	pip install -r requirements.txt
+	export APP_ENV="local" && \
+	export AUTH_DISABLED=true && \
 	streamlit run ./dashboards/$(DASHBOARD)/app.py
 
 build:
@@ -14,6 +16,7 @@ run:
 		-e AUTH0_CLIENT_SECRET="${AUTH0_CLIENT_SECRET}" \
 		-e APP_BASE_URL="http://localhost:8501" \
 		-e AUTH_DISABLED=true \
+		-e APP_ENV="local" \
 		$(DASHBOARD):latest
 
 stop:

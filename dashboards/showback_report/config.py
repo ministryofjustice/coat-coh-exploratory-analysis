@@ -1,19 +1,13 @@
 import os
 
 
-APP_ENV = os.getenv("APP_ENV")
+APP_ENV = os.getenv("APP_ENV", "dev")
 
 APP_BASE_URL = os.getenv("APP_BASE_URL")
 
 DASHBOARD_NAME = "MOJ AWS Showback Report"
 
-# Auth0 config
-
-AUTH0_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
-
-AUTH0_CLIENT_SECRET = os.getenv("AUTH0_CLIENT_SECRET")
-
-AUTH0_DOMAIN = (os.getenv("AUTH0_DOMAIN") or "").strip().rstrip("/")
+# Auth config
 
 AUTH_DISABLED = (os.getenv("AUTH_DISABLED") or "").strip().lower() in {
     "1",
@@ -38,11 +32,11 @@ ATHENA_QUERY = os.getenv("ATHENA_CACHE_QUERY")
 
 # Redis config
 
-REDIS_HOST = os.environ["REDIS_HOST"]
+REDIS_HOST = os.getenv("REDIS_HOST", "")
 
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 
-REDIS_PASSWORD = os.environ["REDIS_PASSWORD"]
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 
 CACHE_TTL_SECONDS = int(
     os.getenv("ATHENA_CACHE_TTL_SECONDS", "3024000")
@@ -50,7 +44,7 @@ CACHE_TTL_SECONDS = int(
 
 # Redis config validation
 
-if not REDIS_HOST or not REDIS_PASSWORD:
+if APP_ENV != "local" and (not REDIS_HOST or not REDIS_PASSWORD):
     raise ValueError("Redis host and password must not be empty")
 
 if CACHE_TTL_SECONDS <= 0:

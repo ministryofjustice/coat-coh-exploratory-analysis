@@ -3,9 +3,11 @@ import plotly.graph_objects as go
 import streamlit as st
 from datetime import datetime, timezone
 from redis.exceptions import RedisError
+import pandas as pd
 
 from services.redis_service import RedisReadService, CacheUnavailable
-from auth import require_auth0_login
+from hosting_data import MissingColumnsError, read_hosting_csv
+from auth import require_entra_login
 from config import APP_ENV, DASHBOARD_NAME, ATHENA_DATABASE, ATHENA_QUERY
 from hosting_report import (
     ALL_BUSINESS_UNITS,
@@ -33,8 +35,7 @@ st.set_page_config(
 
 render_header()
 
-if APP_ENV:
-    require_auth0_login()
+require_entra_login()
 
 st.title(DASHBOARD_NAME)
 st.caption(
@@ -46,33 +47,53 @@ st.caption(
 # Data load
 # -----------------------------
 
-redis_service = RedisReadService()
+@st.cache_data
+def load_hosting_csv(uploaded_file):
+    return read_hosting_csv(uploaded_file)
+
+df = pd.DataFrame()
+
+if APP_ENV != "local":
+    redis_service = RedisReadService()
 
 
-with st.spinner("Loading your data..."):
+    with st.spinner("Loading your data..."):
+        try:
+            df = redis_service.run_query_to_df(ATHENA_DATABASE, ATHENA_QUERY)
+        except CacheUnavailable as error:
+            print("Cached dataset unavailable")
+            st.error(str(error))
+            st.stop()
+        except RedisError:
+            print("Redis access failed")
+            st.error(
+                "The data cache is unavailable. "
+                "Please contact the dashboard support team."
+            )
+            st.stop()
+
+    refreshed_at = datetime.fromtimestamp(
+        redis_service.last_refreshed_at,
+        timezone.utc,
+    )
+
+    st.caption(
+        f"Data snapshot: {refreshed_at:%Y-%m-%d %H:%M UTC}. "
+        "Refreshed monthly."
+    )
+else:
+    csv_file = manual_file_upload()
+
     try:
-        df = redis_service.run_query_to_df(ATHENA_DATABASE, ATHENA_QUERY)
-    except CacheUnavailable as error:
-        print("Cached dataset unavailable")
-        st.error(str(error))
+        with st.spinner("Loading and validating the Hosting CSV..."):
+            df = load_hosting_csv(csv_file)
+    except MissingColumnsError as exc:
+        st.error("The CSV is missing these columns:")
+        st.write(exc.missing)
         st.stop()
-    except RedisError:
-        print("Redis access failed")
-        st.error(
-            "The data cache is unavailable. "
-            "Please contact the dashboard support team."
-        )
+    except ValueError as exc:
+        st.error(f"Could not read the CSV: {exc}")
         st.stop()
-
-refreshed_at = datetime.fromtimestamp(
-    redis_service.last_refreshed_at,
-    timezone.utc,
-)
-
-st.caption(
-    f"Data snapshot: {refreshed_at:%Y-%m-%d %H:%M UTC}. "
-    "Refreshed monthly."
-)
 
 if df.empty:
     st.warning("The dataframs is empty.")

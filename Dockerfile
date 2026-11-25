@@ -37,7 +37,10 @@ COPY --chown=appuser:appgroup requirements.txt ./
 RUN python3 -m venv .venv && source .venv/bin/activate && \
     pip install -r requirements.txt
 
-ENV PATH="/$DASHBOARD/.venv/bin:$PATH"
+ENV PATH="/home/$DASHBOARD/.venv/bin:$PATH"
+
+# Copy the launcher into /home/$DASHBOARD
+COPY --chown=appuser:appgroup /dashboards/common/launcher.py ./
 
 # Copy application code
 COPY --chown=appuser:appgroup /dashboards/$DASHBOARD $DASHBOARD
@@ -55,4 +58,5 @@ EXPOSE 8501
 # Healthcheck
 HEALTHCHECK --interval=60s --timeout=30s CMD curl -I -XGET http://localhost:8501 || exit 1
 
-ENTRYPOINT /home/$DASHBOARD/.venv/bin/streamlit run ./$DASHBOARD/app.py --server.address=0.0.0.0 --server.port=8501
+ENTRYPOINT ["python", "launcher.py"]
+CMD ["--server.address=0.0.0.0", "--server.port=8501"]
