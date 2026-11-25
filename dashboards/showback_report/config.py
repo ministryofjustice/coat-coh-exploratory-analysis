@@ -44,7 +44,7 @@ CACHE_TTL_SECONDS = int(
 
 # Redis config validation
 
-if APP_ENV != "local" and (REDIS_HOST or not REDIS_PASSWORD):
+if APP_ENV != "local" and (not REDIS_HOST or not REDIS_PASSWORD):
     raise ValueError("Redis host and password must not be empty")
 
 if CACHE_TTL_SECONDS <= 0:
